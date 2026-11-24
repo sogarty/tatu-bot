@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -52,17 +53,19 @@ def _create_dp():
     return local_dp
 
 
-def _set_webhook(bot_instance: Bot, url: str, secret: str) -> None:
-    """Устанавливает webhook с повторами при TelegramRetryAfter."""
+async def _set_webhook(bot_instance: Bot, url: str, secret: str) -> None:
+    """Асинхронно устанавливает webhook с повторами при TelegramRetryAfter."""
     max_retries = 5
     for attempt in range(1, max_retries + 1):
         try:
-            bot_instance.set_webhook(
+            result = await bot_instance.set_webhook(
                 url,
                 secret_token=secret,
                 drop_pending_updates=True,
             )
-            logger.info("Webhook установлен: %s", url)
+            # result — True при успехе
+            host = url.split("://", 1)[-1].split("/")[0] if "://" in url else url
+            logger.info("Webhook установлен: %s", host)
             return
         except TelegramRetryAfter as e:
             wait_seconds = e.retry_after + 3
@@ -71,8 +74,10 @@ def _set_webhook(bot_instance: Bot, url: str, secret: str) -> None:
                 "ждём %d сек.",
                 attempt, max_retries, wait_seconds,
             )
-            import time
-            time.sleep(wait_seconds)
+            await asyncio.sleep(wait_seconds)
+        except Exception as e:
+            logger.error("Ошибка при установке webhook (попытка %d/%d): %s", attempt, max_retries, e)
+            break
     logger.error("Не удалось установить webhook после %d попыток", max_retries)
 
 
@@ -98,7 +103,7 @@ async def lifespan(app: FastAPI):
         # Настраиваем Dispatcher и устанавливаем webhook
         dp = _create_dp()
         webhook_url = settings.webhook_base_url.rstrip("/") + "/webhook"
-        _set_webhook(bot, webhook_url, settings.webhook_secret)
+        await _set_webhook(bot, webhook_url, settings.webhook_secret)
 
     # Инициализация БД (создание таблиц) — не требует alembic
     try:
