@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#F8F8FA">
+  <title>Тату-мастер Арину</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ===== СТОК ЭКРАНОВ ===== -->
+
+  <!-- 0. ЗАГРУЗКА -->
+  <div id="screen-loading" class="screen active">
+    <div class="loading">
+      <div class="loading-spinner"></div>
+      <p>Загружаем...</p>
+    </div>
+  </div>
+
+  <!-- 1. ГЛАВНОЕ МЕНЮ -->
+  <div id="screen-home" class="screen">
+    <div class="home-content">
+      <div class="home-header">
+        <h1 id="greeting-text"></h1>
+        <p id="home-subtitle" class="text-muted"></p>
+      </div>
+
+      <div id="home-last-request" class="last-request-card hidden">
+        <div class="last-request-header">
+          <span>📋 Ваша последняя заявка</span>
+          <span id="last-request-status" class="status-badge"></span>
+        </div>
+        <div id="last-request-info"></div>
+        <button class="btn btn-text" onclick="App.openLastRequest()">Открыть →</button>
+      </div>
+
+      <div class="home-menu">
+        <button class="menu-btn" onclick="App.startNewRequest()">
+          <span class="menu-btn-icon">✍️</span>
+          <span class="menu-btn-text">Хочу тату</span>
+        </button>
+        <button class="menu-btn" onclick="App.openMyRequests()">
+          <span class="menu-btn-icon">📋</span>
+          <span class="menu-btn-text">Мои заявки</span>
+        </button>
+        <button class="menu-btn" onclick="App.openCalendar()">
+          <span class="menu-btn-icon">📅</span>
+          <span class="menu-btn-text">Календарь</span>
+        </button>
+        <button class="menu-btn" onclick="App.openMasterContact()">
+          <span class="menu-btn-icon">💬</span>
+          <span class="menu-btn-text">Написать мастеру</span>
+        </button>
+      </div>
+
+      <div class="home-footer">
+        <p class="text-muted">Тату-мастер Арину © 2026</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. СОЗДАНИЕ ЗАЯВКИ (FSM, 8 шагов) -->
+  <div id="screen-request-form" class="screen">
+    <!-- Прогресс-бар -->
+    <div class="form-header">
+      <button class="btn-icon" onclick="App.cancelRequestForm()">←</button>
+      <div class="progress-info">
+        <span id="step-label" class="step-label">Шаг 1 из 8</span>
+        <div class="progress-bar">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Шаг 1: Описание идеи -->
+    <div id="step-1" class="form-step active">
+      <h2>Расскажи о своей идее ✍️</h2>
+      <p class="form-description">
+        Самый важный шаг — рассказать, что ты хочешь увидеть на теле.<br>
+        Опиши свою идею максимально подробно: что изображено, какой вайб, есть ли символы.
+      </p>
+      <div class="form-field">
+        <textarea
+          id="field-description"
+          placeholder="Мне хочешь татуировку в виде..."
+          maxlength="1000"
+          rows="5"
+        ></textarea>
+        <span class="char-count"><span id="desc-count">0</span>/1000</span>
+      </div>
+      <p id="error-description" class="error-message hidden"></p>
+    </div>
+
+    <!-- Шаг 2: Референсы -->
+    <div id="step-2" class="form-step">
+      <h2>Пришли референсы 📸</h2>
+      <p class="form-description">
+        Фото, скетч, картинка из Pinterest — anything что поможет мастеру понять твой стиль.<br>
+        Можно прислать от 1 до 5 фото.
+      </p>
+      <div
+        id="drop-zone"
+        class="drop-zone"
+        data-max-files="5"
+      >
+        <div class="drop-zone-content">
+          <span class="drop-zone-icon">📸</span>
+          <p>Перетащите фото сюда или</p>
+          <button class="btn btn-accent" id="file-upload-btn">Загрузить</button>
+          <input type="file" id="file-input" accept="image/*" multiple hidden>
+        </div>
+      </div>
+      <div id="references-preview" class="references-grid"></div>
+      <p class="text-muted" id="ref-counter">Принято: 0 из 5</p>
+    </div>
+
+    <!-- Шаг 3: Место на теле -->
+    <div id="step-3" class="form-step">
+      <h2>Где будет тату? 📍</h2>
+      <p class="form-description">
+        Укажи, на какую часть тела будет татуировка.<br>
+        Например: «предплечье справа», «ребро», «лопатка».
+      </p>
+      <div class="form-field">
+        <input
+          type="text"
+          id="field-location"
+          placeholder="Предплечье слева..."
+          maxlength="100"
+        >
+      </div>
+      <div class="quick-buttons">
+        <button class="chip" data-value="Предплечье">Предплечье</button>
+        <button class="chip" data-value="Рука полностью">Рука полностью</button>
+        <button class="chip" data-value="Ребро">Ребро</button>
+        <button class="chip" data-value="Лопатка">Лопатка</button>
+        <button class="chip" data-value="Нога">Нога</button>
+        <button class="chip" data-value="Шия">Шия</button>
+      </div>
+      <p id="error-location" class="error-message hidden"></p>
+    </div>
+
+    <!-- Шаг 4: Размер -->
+    <div id="step-4" class="form-step">
+      <h2>Какой размер? 📏</h2>
+      <p class="form-description">
+        Примерный размер в сантиметрах или опиши «примерно с ладонь».<br>
+        Мастер сам подскажет, если нужно скорректировать ✨
+      </p>
+      <div class="form-field">
+        <input
+          type="text"
+          id="field-size"
+          placeholder="8×10 см или «примерно с ладонь»..."
+          maxlength="50"
+        >
+      </div>
+      <div class="quick-buttons">
+        <button class="chip" data-value="Маленькая (до 5 см)">Маленькая (до 5 см)</button>
+        <button class="chip" data-value="Средняя (5–15 см)">Средняя (5–15 см)</button>
+        <button class="chip" data-value="Крупная (15–30 см)">Крупная (15–30 см)</button>
+        <button class="chip" data-value="Очень крупная (30+ см)">Очень крупная (30+ см)</button>
+      </div>
+      <p id="error-size" class="error-message hidden"></p>
+    </div>
+
+    <!-- Шаг 5: Цвет -->
+    <div id="step-5" class="form-step">
+      <h2>Ч/Б или цветная? 🎨</h2>
+      <p class="form-description">Какой вариант тебе ближе? Это не ограничение.</p>
+      <div class="color-options">
+        <button class="color-option" data-value="bw">
+          <span class="color-circle bw"></span>
+          <span class="color-label">Чёрно-белая</span>
+        </button>
+        <button class="color-option" data-value="color">
+          <span class="color-circle color"></span>
+          <span class="color-label">Цветная</span>
+        </button>
+      </div>
+      <p id="error-color" class="error-message hidden"></p>
+    </div>
+
+    <!-- Шаг 6: Срочность -->
+    <div id="step-6" class="form-step">
+      <h2>Нужна срочность? ⚡</h2>
+      <p class="form-description">
+        Если тебе нужно сделать эскиз быстрее — я могу добавить срочность.<br>
+        За срочность доплачивается: <strong id="urgent-price-label">0 ₽</strong>
+      </p>
+      <div class="urgency-options">
+        <button class="urgency-option" data-value="yes">
+          <span class="urgency-icon">⚡</span>
+          <span class="urgency-label">Да, срочно</span>
+        </button>
+        <button class="urgency-option" data-value="no">
+          <span class="urgency-icon">○</span>
+          <span class="urgency-label">Нет, обычная очередь</span>
+        </button>
+      </div>
+      <div id="urgent-surcharge" class="urgent-info hidden">
+        <p>Доплата: <strong id="surcharge-amount">0 ₽</strong></p>
+      </div>
+      <p id="error-urgency" class="error-message hidden"></p>
+    </div>
+
+    <!-- Шаг 7: Бриф (4 вопроса) -->
+    <div id="step-7" class="form-step">
+      <h2>Анкета для эскиза 💡</h2>
+      <p class="form-description">
+        Хочешь, чтобы мастер точнее понял твою идею?<br>
+        4 простых вопроса. Займёт минуту ⏱
+      </p>
+      <div class="brief-container">
+        <!-- Q1: Опыт тату -->
+        <div id="brief-q1" class="brief-question hidden">
+          <p class="brief-text">У тебя был опыт тату? 🖊</p>
+          <div class="brief-options">
+            <button class="brief-option" data-value="none">🆕 Нет, это будет первая</button>
+            <button class="brief-option" data-value="few">🖊 Была 1–2</button>
+            <button class="brief-option" data-value="many">🎨 Было 3+</button>
+          </div>
+        </div>
+        <!-- Q2: Стиль -->
+        <div id="brief-q2" class="brief-question hidden">
+          <p class="brief-text">Какой стиль тебе ближе? 🎭</p>
+          <div class="brief-options grid-2">
+            <button class="brief-option" data-value="realism">🎯 Реализм</button>
+            <button class="brief-option" data-value="graphics">✏️ Графика</button>
+            <button class="brief-option" data-value="watercolor">💧 Акварель</button>
+            <button class="brief-option" data-value="geometry">🔷 Геометрия</button>
+            <button class="brief-option brief-option-other" data-value="other">Другое</button>
+          </div>
+          <div id="brief-other-field" class="form-field hidden">
+            <input type="text" id="field-brief-other" placeholder="Укажи стиль...">
+          </div>
+        </div>
+        <!-- Q3: Вдохновение -->
+        <div id="brief-q3" class="brief-question hidden">
+          <p class="brief-text">Откуда ты берёшь вдохновение? 💫</p>
+          <div class="brief-options">
+            <button class="brief-option" data-value="pinterest">📌 Pinterest</button>
+            <button class="brief-option" data-value="instagram">📷 Instagram</button>
+            <button class="brief-option" data-value="own">🖼 Свои референсы</button>
+            <button class="brief-option" data-value="dontknow">🤷 Не знаю</button>
+          </div>
+        </div>
+        <!-- Q4: Что важнее -->
+        <div id="brief-q4" class="brief-question hidden">
+          <p class="brief-text">Что для тебя важнее всего в тату? ✨</p>
+          <div class="brief-options">
+            <button class="brief-option" data-value="aesthetics">🎨 Эстетика</button>
+            <button class="brief-option" data-value="meaning">💭 Смысл / значение</button>
+            <button class="brief-option" data-value="safety">🛡 Безопасность / чистота</button>
+          </div>
+        </div>
+      </div>
+      <p id="error-brief" class="error-message hidden"></p>
+    </div>
+
+    <!-- Шаг 8: Финальная проверка -->
+    <div id="step-8" class="form-step">
+      <h2>Проверь заявку ✅</h2>
+      <p class="form-description">Почти готово! Посмотри, что ты указал:</p>
+      <div id="review-card" class="review-card">
+        <div class="review-section">
+          <div class="review-item">
+            <span class="review-icon">💬</span>
+            <div>
+              <span class="review-label">Описание</span>
+              <p id="review-description" class="review-value"></p>
+            </div>
+          </div>
+        </div>
+        <div class="review-section" id="review-ref-section">
+          <div class="review-item">
+            <span class="review-icon">📸</span>
+            <div>
+              <span class="review-label">Референсы</span>
+              <div id="review-references" class="review-references"></div>
+            </div>
+          </div>
+        </div>
+        <div class="review-section">
+          <div class="review-item">
+            <span class="review-icon">📍</span>
+            <span class="review-value" id="review-location"></span>
+          </div>
+          <div class="review-item">
+            <span class="review-icon">📏</span>
+            <span class="review-value" id="review-size"></span>
+          </div>
+          <div class="review-item">
+            <span class="review-icon">🎨</span>
+            <span class="review-value" id="review-color"></span>
+          </div>
+          <div class="review-item">
+            <span class="review-icon">⚡</span>
+            <span class="review-value" id="review-urgency"></span>
+          </div>
+        </div>
+        <div class="review-section" id="review-brief-section">
+          <div class="review-item">
+            <span class="review-icon">💡</span>
+            <div>
+              <span class="review-label">Анкета</span>
+              <div id="review-brief" class="review-brief"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="review-actions">
+        <button class="btn btn-secondary full-width" onclick="App.showEditOptions()">✏️ Изменить</button>
+        <button class="btn btn-accent full-width" onclick="App.submitRequest()">✉️ Отправить заявку</button>
+      </div>
+    </div>
+
+    <!-- Нижние кнопки навигации формы -->
+    <div class="form-nav">
+      <button id="btn-back" class="btn btn-secondary" onclick="App.prevStep()" disabled>← Назад</button>
+      <button id="btn-next" class="btn btn-accent" onclick="App.nextStep()">Далее →</button>
+    </div>
+  </div>
+
+  <!-- 3. МОИ ЗАЯВКИ -->
+  <div id="screen-my-requests" class="screen">
+    <div class="page-header">
+      <button class="btn-icon" onclick="App.goHome()">←</button>
+      <h2>Мои заявки</h2>
+    </div>
+
+    <div id="requests-loading" class="loading hidden">
+      <div class="loading-spinner"></div>
+    </div>
+
+    <div id="requests-empty" class="empty-state hidden">
+      <div class="empty-icon">🖋️</div>
+      <h3>У тебя пока нет заявок</h3>
+      <p>Но ты всегда можешь создать новую!</p>
+      <button class="btn btn-accent full-width" onclick="App.startNewRequest()">✍️ Хочу тату</button>
+    </div>
+
+    <div id="requests-list" class="requests-list"></div>
+  </div>
+
+  <!-- 4. ДЕТАЛИ ЗАЯВКИ (модал) -->
+  <div id="modal-request-detail" class="modal hidden">
+    <div class="modal-overlay" onclick="App.closeModal('modal-request-detail')"></div>
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <button class="btn-icon" onclick="App.closeModal('modal-request-detail')">←</button>
+        <h2 id="detail-title">Заявка #1</h2>
+        <span id="detail-status" class="status-badge"></span>
+      </div>
+      <div class="modal-body">
+        <div class="detail-section">
+          <div class="detail-item">
+            <span class="detail-icon">📍</span>
+            <span class="detail-label">Место</span>
+            <span id="detail-location" class="detail-value"></span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-icon">📏</span>
+            <span class="detail-label">Размер</span>
+            <span id="detail-size" class="detail-value"></span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-icon">🎨</span>
+            <span class="detail-label">Цвет</span>
+            <span id="detail-color" class="detail-value"></span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-icon">⚡</span>
+            <span class="detail-label">Срочность</span>
+            <span id="detail-urgency" class="detail-value"></span>
+          </div>
+        </div>
+        <div class="detail-section">
+          <h3>Описание</h3>
+          <p id="detail-description" class="detail-text"></p>
+        </div>
+        <div class="detail-section" id="detail-ref-section">
+          <h3>Референсы</h3>
+          <div id="detail-references" class="detail-references"></div>
+        </div>
+        <div class="detail-section" id="detail-brief-section">
+          <h3>Анкета</h3>
+          <div id="detail-brief" class="detail-brief"></div>
+        </div>
+        <div class="detail-section" id="detail-rejection-section" class="hidden">
+          <h3>Причина отклонения</h3>
+          <p id="detail-reason" class="detail-text"></p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-accent full-width" onclick="App.openMasterContact()">💬 Написать мастеру</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. КАРТОЧКА СТОИМОСТИ (для отклонения) -->
+  <div id="modal-cost" class="modal hidden">
+    <div class="modal-overlay" onclick="App.closeModal('modal-cost')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <button class="btn-icon" onclick="App.closeModal('modal-cost')">←</button>
+        <h2>Заявка</h2>
+      </div>
+      <div class="modal-body">
+        <div class="cost-card">
+          <div class="cost-item">
+            <span>Базовая стоимость</span>
+            <strong id="cost-base">0 ₽</strong>
+          </div>
+          <div class="cost-item" id="cost-urgent-item">
+            <span>Срочность</span>
+            <strong id="cost-urgent">0 ₽</strong>
+          </div>
+          <div class="cost-divider"></div>
+          <div class="cost-total">
+            <span>Итого</span>
+            <strong id="cost-total">0 ₽</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. КАЛЕНДАРЬ -->
+  <div id="screen-calendar" class="screen">
+    <div class="page-header">
+      <button class="btn-icon" onclick="App.goHome()">←</button>
+      <h2>Календарь</h2>
+    </div>
+
+    <div class="calendar-nav">
+      <button class="btn-icon calendar-nav-btn" id="cal-prev" onclick="App.prevMonth()">◀</button>
+      <h3 id="calendar-month-year"></h3>
+      <button class="btn-icon calendar-nav-btn" id="cal-next" onclick="App.nextMonth()">▶</button>
+    </div>
+
+    <div class="calendar-grid-header">
+      <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
+    </div>
+    <div id="calendar-grid" class="calendar-grid"></div>
+
+    <div class="calendar-legend">
+      <div class="legend-item">
+        <span class="legend-dot legend-free"></span>
+        <span>Свободно</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot legend-busy"></span>
+        <span>Занято</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot legend-today"></span>
+        <span>Сегодня</span>
+      </div>
+    </div>
+
+    <div id="calendar-empty" class="empty-state hidden">
+      <div class="empty-icon">📅</div>
+      <h3>Скоро появятся свободные даты</h3>
+      <p>А пока можешь написать мастеру 💬</p>
+      <button class="btn btn-accent full-width" onclick="App.openMasterContact()">💬 Написать мастеру</button>
+    </div>
+
+    <div class="calendar-footer">
+      <button class="btn btn-accent full-width" onclick="App.openMasterContact()">💬 Для записи напиши мастеру в ЛС</button>
+    </div>
+  </div>
+
+  <!-- 7. ЭКРАН УСПЕХА -->
+  <div id="screen-success" class="screen">
+    <div class="success-content">
+      <div class="success-icon">🎉</div>
+      <h2>Заявка отправлена!</h2>
+      <p id="success-request-id"></p>
+      <p class="text-muted">
+        Мастер Арину скоро посмотрит и ответит тебе.<br>
+        Обычно это занимает несколько часов — не переживай ✨
+      </p>
+      <p class="text-muted">А пока можешь:</p>
+      <div class="success-actions">
+        <button class="btn btn-secondary full-width" onclick="App.openMyRequests()">📋 Мои заявки</button>
+        <button class="btn btn-secondary full-width" onclick="App.openCalendar()">📅 Календарь</button>
+        <button class="btn btn-accent full-width" onclick="App.startNewRequest()">✍️ Новая заявка</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. ПРОДАКШН КОНФЕТТИ (скрытый canvas) -->
+  <canvas id="confetti-canvas" class="confetti-canvas hidden"></canvas>
+
+  <!-- 9. НИЖНЯЯ НАВИГАЦИЯ (Mini App) -->
+  <nav id="bottom-nav" class="bottom-nav hidden">
+    <button class="nav-item active" data-screen="screen-home" onclick="App.goHome()">
+      <span class="nav-icon">🏠</span>
+      <span class="nav-label">Главная</span>
+    </button>
+    <button class="nav-item" onclick="App.startNewRequest()">
+      <span class="nav-icon">✍️</span>
+      <span class="nav-label">Заявка</span>
+    </button>
+    <button class="nav-item" onclick="App.openMyRequests()">
+      <span class="nav-icon">👤</span>
+      <span class="nav-label">Профиль</span>
+    </button>
+  </nav>
+
+  <!-- Контейнер для MainButton Telegram -->
+  <div id="tg-main-button" class="hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
