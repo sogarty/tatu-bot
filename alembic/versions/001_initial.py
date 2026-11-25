@@ -1,4 +1,4 @@
-"""Initial migration — создаёт все таблицы БД.
+﻿"""Initial migration — создаёт все таблицы БД.
 
 P0-2: UNIQUE(slot_id) на appointment
 P0-4: CHECK constraints на status
@@ -21,7 +21,7 @@ def upgrade() -> None:
     # ─── tg_user ───────────────────────────────────────────────────────
     op.create_table(
         "tg_user",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), autoincrement=True, nullable=False),
         sa.Column("tg_id", sa.BigInteger(), nullable=False),
         sa.Column("username", sa.String(32), nullable=True),
         sa.Column("first_name", sa.String(100), nullable=False),
@@ -70,7 +70,7 @@ def upgrade() -> None:
     # ─── tattoo_request ────────────────────────────────────────────────
     op.create_table(
         "tattoo_request",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), autoincrement=True, nullable=False),
         sa.Column("user_id", sa.BigInteger(), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("location", sa.String(100), nullable=False),
@@ -126,7 +126,7 @@ def upgrade() -> None:
     # ─── request_reference ─────────────────────────────────────────────
     op.create_table(
         "request_reference",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), autoincrement=True, nullable=False),
         sa.Column("request_id", sa.BigInteger(), nullable=False),
         sa.Column("order_index", sa.Integer(), nullable=False),
         sa.Column("file_id", sa.Text(), nullable=False),
@@ -147,7 +147,7 @@ def upgrade() -> None:
     # ─── brief_question ────────────────────────────────────────────────
     op.create_table(
         "brief_question",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), autoincrement=True, nullable=False),
         sa.Column("request_id", sa.BigInteger(), nullable=False),
         sa.Column("question_key", sa.String(100), nullable=False),
         sa.Column("answer_text", sa.Text(), nullable=True),
@@ -170,7 +170,7 @@ def upgrade() -> None:
     # ─── master_slot ───────────────────────────────────────────────────
     op.create_table(
         "master_slot",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), autoincrement=True, nullable=False),
         sa.Column("slot_date", sa.Date(), nullable=False),
         sa.Column(
             "is_blocked", sa.Boolean(), server_default=sa.text("false"), nullable=False
@@ -191,7 +191,7 @@ def upgrade() -> None:
     # ─── appointment ───────────────────────────────────────────────────
     op.create_table(
         "appointment",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), autoincrement=True, nullable=False),
         sa.Column("request_id", sa.BigInteger(), nullable=False),
         sa.Column("slot_id", sa.BigInteger(), nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="confirmed"),
@@ -223,7 +223,7 @@ def upgrade() -> None:
     # ─── notification_log ──────────────────────────────────────────────
     op.create_table(
         "notification_log",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), autoincrement=True, nullable=False),
         sa.Column("request_id", sa.BigInteger(), nullable=False),
         sa.Column("type", sa.String(50), nullable=False),
         sa.Column("tg_chat_id", sa.BigInteger(), nullable=False),
