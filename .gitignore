@@ -1,0 +1,12 @@
+.env
+venv/
+logs/
+*.db
+*.db-journal
+__pycache__/
+*.pyc
+.pytest_cache/
+.gigacode/
+Python/
+probe*
+_temp*
