@@ -72,7 +72,10 @@ def make_init_data(user_id: int, first_name: str = "Анна") -> str:
     # data_check_string: по алфавиту, key=value, через \n
     check_string = "\n".join(f"{k}={params[k]}" for k in sorted(params))
 
-    secret = hmac.new(BOT_TOKEN.encode(), b"WebAppData", hashlib.sha256).digest()
+    # Secret key: HMAC(key=b"WebAppData", msg=bot_token).
+    # ВАЖНО: именно в таком порядке. Перестановка даёт другую подпись,
+    # и настоящий Telegram-вход отвергается.
+    secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
     h = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
 
     # Telegram присылает значения в URL-кодировке — воспроизводим это,
@@ -98,6 +101,20 @@ def main() -> int:
     print()
 
     with TestClient(app) as c:
+        # 0. Главная защита от прежней ошибки: наша подпись обязана
+        #    совпадать с независимой реализацией aiogram. Если формула
+        #    снова «перевернётся», этот тест упадёт первым.
+        try:
+            from aiogram.utils.web_app import check_webapp_signature
+
+            sample = make_init_data(CLIENT_ID)
+            check(
+                "подпись совпадает с независимой реализацией aiogram",
+                check_webapp_signature(BOT_TOKEN, sample),
+            )
+        except ImportError:  # pragma: no cover
+            check("aiogram доступен для сверки подписи", False, "не установлен")
+
         # 1. Без авторизации — отказ
         r = c.get("/api/v1/me")
         check("без авторизации /me → 401", r.status_code == 401, f"status={r.status_code}")

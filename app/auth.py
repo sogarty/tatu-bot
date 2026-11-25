@@ -8,11 +8,18 @@
 Алгоритм — из официальной документации Telegram
 (https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app):
 
-    secret_key = HMAC_SHA256(key=bot_token, msg="WebAppData")
-    hash       = HMAC_SHA256(key=secret_key, msg=data_check_string)
+    secret_key = HMAC_SHA256(key="WebAppData", msg=bot_token)
+    hash       = HMAC_SHA256(key=secret_key,   msg=data_check_string)
 
 где data_check_string — все поля, кроме hash, отсортированные по имени
 в формате key=value и соединённые переводом строки.
+
+ВАЖНО про порядок аргументов: ключ — литерал "WebAppData", данные — токен.
+Перестановка местами даёт другую подпись, и тогда отвергается ЛЮБОЙ
+настоящий вход из Telegram. Именно эта ошибка и была здесь раньше;
+тесты её не ловили, потому что подписывали данные той же неверной
+формулой. Теперь проверка сверяется с независимой реализацией aiogram
+(см. scripts/verify_auth_signature.py).
 """
 
 from __future__ import annotations
@@ -47,10 +54,16 @@ def _build_check_string(params: dict[str, str]) -> str:
 
 
 def _hash_matches(bot_token: str, check_string: str, received_hash: str) -> bool:
-    """Сверяет HMAC-SHA256 подпись в постоянном времени."""
+    """Сверяет HMAC-SHA256 подпись в постоянном времени.
+
+    secret_key = HMAC(key=b"WebAppData", msg=bot_token)
+    hash       = HMAC(key=secret_key,      msg=data_check_string)
+
+    Ключ и данные нельзя менять местами — это разные подписи.
+    """
     secret_key = hmac.new(
-        bot_token.encode("utf-8"),
         b"WebAppData",
+        bot_token.encode("utf-8"),
         hashlib.sha256,
     ).digest()
     computed = hmac.new(
@@ -58,7 +71,9 @@ def _hash_matches(bot_token: str, check_string: str, received_hash: str) -> bool
         check_string.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(computed, received_hash)
+    return hmac.compare_digest(
+        computed.encode("utf-8"), received_hash.encode("utf-8")
+    )
 
 
 def verify_telegram_webapp_init_data(
@@ -90,9 +105,11 @@ def verify_telegram_webapp_init_data(
         if not hash_value:
             return None
 
-        # `signature` (Bot API 8.0+) не входит в data_check_string,
-        # но старые клиенты его и не присылают. Проверяем оба варианта —
-        # подпись в любом случае требует знания bot_token.
+        # `signature` (Bot API 8.0+) — спорный случай: документация для
+        # Ed25519-проверки исключает его из строки, а aiogram при проверке
+        # hash включает. Поэтому пробуем оба варианта: без него и с ним.
+        # Безопасность не страдает — в любом варианте нужна подпись,
+        # невоспроизводимая без bot_token.
         params_for_hash = dict(raw_params)
         params_for_hash.pop("signature", None)
 
@@ -100,7 +117,6 @@ def verify_telegram_webapp_init_data(
         ok = _hash_matches(bot_token, check_string, hash_value)
 
         if not ok and "signature" in raw_params:
-            # На случай клиента, который включил signature в подпись.
             ok = _hash_matches(
                 bot_token, _build_check_string(raw_params), hash_value
             )
