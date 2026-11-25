@@ -472,13 +472,21 @@ class TestEndpointAuthorization:
         assert "owner_of_request" in finalize_section
     
     def test_accept_request_requires_admin(self):
-        """POST /api/v1/requests/{id}/accept — требует админа."""
+        """POST /api/v1/requests/{id}/accept — требует админа.
+
+        Мастерские действия защищены ТОЛЬКО через admin_only: заявку
+        выбирает _load_locked по id, а owner_of_request тут не нужен
+        (он ограничивал бы мастера его собственными заявками).
+        """
         with open(os.path.join(os.path.dirname(__file__), "..", "app", "routers", "requests.py")) as f:
             content = f.read()
-        
+
         accept_section = content.split('async def accept_request')[1].split('class RejectPayload')[0]
         assert "admin_only" in accept_section
-        assert "owner_of_request" in accept_section
+        # Заявка загружается с блокировкой строки, а не через owner_of_request
+        assert "_load_locked" in accept_section
+        # И ни в коем случае не пускает обычного пользователя
+        assert "get_current_user" not in accept_section.replace("admin_only", "")
     
     def test_trash_requires_admin(self):
         """GET /api/v1/trash — требует админа."""
