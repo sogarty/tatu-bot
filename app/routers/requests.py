@@ -231,7 +231,11 @@ async def list_requests(
     session: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Список заявок. Мастер видит все, клиент — только свои."""
+    """Список заявок. Мастер видит все, клиент — только свои.
+
+    Архивные заявки по умолчанию скрыты: мастер убрал их в корзину,
+    значит клиент не должен видеть их снова в «Моих заявках».
+    """
     stmt = (
         select(TattooRequest)
         .options(*_FULL_OPTIONS)
@@ -240,8 +244,12 @@ async def list_requests(
 
     if status_filter:
         stmt = stmt.where(TattooRequest.status == status_filter)
-    if archived is not None:
-        stmt = stmt.where(TattooRequest.is_archived == archived)
+
+    # Явный запрос архива — только для мастера (клиенту архив не нужен).
+    if archived is True and current_user.get("is_admin"):
+        stmt = stmt.where(TattooRequest.is_archived == True)  # noqa: E712
+    else:
+        stmt = stmt.where(TattooRequest.is_archived == False)  # noqa: E712
 
     if not current_user.get("is_admin"):
         stmt = stmt.where(TattooRequest.user_id == current_user["user_id"])

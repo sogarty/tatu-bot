@@ -8,7 +8,7 @@
   <!-- Обязательно: без этого скрипта Telegram не передаёт initData,
        и приложение не может авторизоваться на сервере. -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <!-- ===== ЭКРАНЫ ===== -->
@@ -368,6 +368,31 @@
     </div>
   </div>
 
+  <!-- 4b. НАЗНАЧЕНИЕ ДАТЫ (мастер) -->
+  <!-- Свой выбор даты вместо встроенного prompt(): он надёжно работает
+       внутри Telegram и не зависит от поддержки WebView. -->
+  <div id="modal-schedule" class="modal hidden">
+    <div class="modal-overlay" onclick="App.closeModal('modal-schedule')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <button class="btn-icon" onclick="App.closeModal('modal-schedule')">←</button>
+        <h3>Дата сеанса</h3>
+      </div>
+      <div class="modal-body">
+        <div class="form-field">
+          <label class="step-label" for="schedule-date-input">Выбери день</label>
+          <input type="date" id="schedule-date-input" />
+        </div>
+        <p id="schedule-error" class="text-muted"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-accent full-width" id="schedule-confirm-btn" onclick="App.confirmScheduleDate()">
+          Назначить дату
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 5. КАЛЕНДАРЬ -->
   <div id="screen-calendar" class="screen">
     <div class="page-header">
@@ -480,6 +505,6 @@
   <!-- Тосты -->
   <div id="toast" class="hidden" style="position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#2B2B33;color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;z-index:9999;max-width:88%;text-align:center;"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

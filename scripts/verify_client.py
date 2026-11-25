@@ -334,6 +334,35 @@ def main() -> int:
         check("нет дублирующегося атрибута class в index.html",
               'class="detail-section" id="detail-rejection-section" class=' not in html)
 
+        # ── Архив: заявка, убранная мастером, исчезает у клиента ─────────
+        # Раньше DELETE /trash только помечал is_archived, но список
+        # возвращал её снова — клиент видел «удалённую» заявку.
+        r = c.post("/api/v1/requests", headers=auth(CLIENT_ID), json={
+            "description": "Проверка архива: тигр",
+            "location": "рука",
+            "size": "10 см",
+            "color_mode": "color",
+            "is_urgent": False,
+        })
+        archived_id = r.json()["id"]
+        r = c.delete(f"/api/v1/trash/{archived_id}", headers=auth(MASTER_ID))
+        check("мастер убирает заявку в архив → 204", r.status_code == 204,
+              f"status={r.status_code}")
+
+        r = c.get("/api/v1/requests?limit=100", headers=auth(CLIENT_ID))
+        ids = [x["id"] for x in r.json()]
+        check("архивная заявка НЕ видна клиенту", archived_id not in ids,
+              f"ids={ids}")
+
+        # ── Здоровье: диагностика видна, а не спрятана ──────────────────
+        r = c.get("/api/v1/health")
+        body = r.json() if r.status_code == 200 else {}
+        check("health отвечает 200", r.status_code == 200, f"status={r.status_code}")
+        check("health сообщает тип базы", bool(body.get("database_backend")),
+              str(body.get("database_backend")))
+        check("health сообщает о сохранности данных",
+              "data_persistent" in body, str(body.get("data_persistent")))
+
     return finish()
 
 

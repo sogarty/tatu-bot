@@ -38,31 +38,41 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_auth_test.db"
 # ─── Helper: генерация валидного initData ────────────────────────────────────
 
 
+def sign_init_data(params: dict[str, str]) -> str:
+    """Считает hash ровно как Telegram.
+
+    secret = HMAC(key=b"WebAppData", msg=bot_token)
+    hash   = HMAC(key=secret, msg=data_check_string)
+
+    ВАЖНО: ключ — литерал "WebAppData", данные — токен. Перестановка
+    даёт другую подпись, и тогда тесты «проходят» на сломанной проверке
+    (именно так ошибка когда-то попала в продакшн). Эта функция — ЕДИНСТВЕННОЕ
+    место в тестах, где считается подпись; дублировать формулу нельзя.
+    """
+    check_string = "\n".join(f"{k}={params[k]}" for k in sorted(params))
+    bot_token = os.environ["BOT_TOKEN"]
+    secret_key = hmac.new(
+        b"WebAppData",
+        bot_token.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return hmac.new(
+        secret_key,
+        check_string.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def generate_valid_init_data(user_id: int = 42, ttl: int = 86400) -> str:
     """Генерирует валидный Telegram WebApp initData для тестов."""
     auth_date = int(time.time())
     user_data = json.dumps({"id": user_id, "first_name": "Test", "username": "test_user"})
     
-    raw_params = {
+    params = {
         "auth_date": str(auth_date),
         "user": user_data,
     }
-    
-    sorted_params = sorted(raw_params.items(), key=lambda x: x[0])
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted_params)
-    
-    bot_token = os.environ["BOT_TOKEN"]
-    secret_key = hmac.new(
-        bot_token.encode("utf-8"),
-        b"WebAppData",
-        hashlib.sha256,
-    ).digest()
-    
-    computed_hash = hmac.new(
-        secret_key,
-        data_check_string.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    computed_hash = sign_init_data(params)
     
     return f"auth_date={auth_date}&user={user_data}&hash={computed_hash}"
 
@@ -72,26 +82,11 @@ def generate_expired_init_data(user_id: int = 42) -> str:
     auth_date = int(time.time()) - 3 * 86400  # 3 дня назад
     user_data = json.dumps({"id": user_id, "first_name": "Test"})
     
-    raw_params = {
+    params = {
         "auth_date": str(auth_date),
         "user": user_data,
     }
-    
-    sorted_params = sorted(raw_params.items(), key=lambda x: x[0])
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted_params)
-    
-    bot_token = os.environ["BOT_TOKEN"]
-    secret_key = hmac.new(
-        bot_token.encode("utf-8"),
-        b"WebAppData",
-        hashlib.sha256,
-    ).digest()
-    
-    computed_hash = hmac.new(
-        secret_key,
-        data_check_string.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    computed_hash = sign_init_data(params)
     
     return f"auth_date={auth_date}&user={user_data}&hash={computed_hash}"
 
@@ -102,6 +97,43 @@ def generate_invalid_hash_init_data(user_id: int = 42) -> str:
     user_data = json.dumps({"id": user_id, "first_name": "Test"})
     
     return f"auth_date={auth_date}&user={user_data}&hash=invalid_hash_value"
+
+
+# ─── 0. Сверка алгоритма с независимой реализацией ───────────────────────────
+# Эта проверка — главная защита: если формула подписи снова «перевернётся»,
+# упадёт ОНА, а не пользователь в Telegram. Прежние тесты подписывали данные
+# той же неверной функцией, что и проверка, поэтому дефект дошёл до продакшна.
+
+
+def test_signature_matches_aiogram():
+    """Наша подпись должна совпадать с независимой реализацией aiogram."""
+    aiogram_web_app = pytest.importorskip("aiogram.utils.web_app")
+    init_data = generate_valid_init_data(user_id=42)
+    assert aiogram_web_app.check_webapp_signature(
+        os.environ["BOT_TOKEN"], init_data
+    ) is True
+
+
+def test_swapped_key_rejected():
+    """Старая неверная формула (ключ/данные местами) должна отвергаться."""
+    from app.auth import verify_telegram_webapp_init_data
+
+    bot_token = os.environ["BOT_TOKEN"]
+    auth_date = int(time.time())
+    user_data = json.dumps({"id": 42, "first_name": "Test"})
+    params = {"auth_date": str(auth_date), "user": user_data}
+    check_string = "\n".join(f"{k}={params[k]}" for k in sorted(params))
+
+    # Заведомо неверный порядок аргументов.
+    wrong_secret = hmac.new(
+        bot_token.encode("utf-8"), b"WebAppData", hashlib.sha256
+    ).digest()
+    wrong_hash = hmac.new(
+        wrong_secret, check_string.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+    init_data = f"auth_date={auth_date}&user={user_data}&hash={wrong_hash}"
+    assert verify_telegram_webapp_init_data(bot_token, init_data) is None
 
 
 # ─── 1. verify_telegram_webapp_init_data (8 тестов) ─────────────────────────
@@ -195,20 +227,7 @@ class TestVerifyInitData:
             "user": "{invalid json",
         }
         
-        sorted_params = sorted(raw_params.items(), key=lambda x: x[0])
-        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted_params)
-        
-        secret_key = hmac.new(
-            bot_token.encode("utf-8"),
-            b"WebAppData",
-            hashlib.sha256,
-        ).digest()
-        
-        computed_hash = hmac.new(
-            secret_key,
-            data_check_string.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
+        computed_hash = sign_init_data(raw_params)
         
         init_data = f"auth_date={auth_date}&user={raw_params['user']}&hash={computed_hash}"
         

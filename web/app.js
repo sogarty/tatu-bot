@@ -53,6 +53,12 @@ const TOTAL_STEPS = 7;
 // Сколько ждём ответ сервера. Дольше держать человека на спиннере нельзя.
 const REQUEST_TIMEOUT_MS = 20000;
 
+// Бесплатный хостинг «засыпает» и просыпается ~50 секунд. Первый запрос
+// после пробуждения поэтому может не успеть. Вход (me) повторяем дольше,
+// с понятным текстом, чтобы человек не видел ложную ошибку.
+const LOGIN_TIMEOUT_MS = 30000;
+const LOGIN_RETRIES = 3;
+
 /* ===================================================
    STATE
    =================================================== */
@@ -71,6 +77,7 @@ const state = {
   calendarMonth: new Date().getMonth(),
   calendarSlots: {},
   lastRequestId: null,
+  pendingScheduleId: null,
 };
 
 function emptyDraft() {
@@ -140,10 +147,11 @@ function authHeader() {
 }
 
 async function apiFetch(endpoint, options = {}) {
+  const { timeoutMs, ...fetchOptions } = options;
   const headers = Object.assign(
     { 'Content-Type': 'application/json' },
     authHeader(),
-    options.headers || {}
+    fetchOptions.headers || {}
   );
 
   let res;
@@ -151,10 +159,13 @@ async function apiFetch(endpoint, options = {}) {
     // Таймаут обязателен: на мобильной связи запрос может «висеть» вечно,
     // и человек останется навсегда на экране загрузки.
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => controller.abort(),
+      timeoutMs || REQUEST_TIMEOUT_MS
+    );
     try {
       res = await fetch(API_BASE + endpoint, {
-        ...options,
+        ...fetchOptions,
         headers,
         signal: controller.signal,
       });
@@ -240,8 +251,10 @@ async function init() {
     return;
   }
 
+  setLoadingText('Загружаем...');
+
   try {
-    const res = await apiGet('me');
+    const res = await loginWithRetry();
     if (!res.ok) {
       showFatal('Не удалось войти', res.error || 'Проверь связь и попробуй снова.');
       return;
@@ -253,6 +266,8 @@ async function init() {
     // Любой неожиданный сбой не должен оставлять человека на спиннере.
     showFatal('Что-то пошло не так', 'Попробуй открыть приложение ещё раз.');
     return;
+  } finally {
+    setLoadingText('Загружаем...');
   }
 
   // Показываем вход в кабинет только мастеру
@@ -260,6 +275,45 @@ async function init() {
   if (masterBlock) masterBlock.style.display = state.me.is_admin ? '' : 'none';
 
   await goHome();
+}
+
+/** Меняет подпись под спиннером (например, «сервер просыпается»). */
+function setLoadingText(text) {
+  const el = document.getElementById('loading-text');
+  if (el) el.textContent = text;
+}
+
+/**
+ * Вход с повторами.
+ *
+ * Бесплатный сервер засыпает после простоя и просыпается не мгновенно.
+ * Первый вход после пробуждения может просто не успеть — это не ошибка
+ * человека и не повод показывать «Не удалось войти». Повторяем несколько
+ * раз и честно пишем, что сервер просыпается.
+ */
+async function loginWithRetry() {
+  let last = null;
+
+  for (let attempt = 1; attempt <= LOGIN_RETRIES; attempt++) {
+    const res = await apiFetch('me', { method: 'GET', timeoutMs: LOGIN_TIMEOUT_MS });
+
+    // Успех или осмысленный отказ сервера (401 и т.п.) — повторять нечего.
+    if (res.ok || (res.status && res.status !== 0)) {
+      return res;
+    }
+
+    last = res;
+    if (attempt < LOGIN_RETRIES) {
+      setLoadingText('Сервер просыпается, подожди немного…');
+      await sleep(1500 * attempt);
+    }
+  }
+
+  return last || { ok: false, status: 0, error: 'Сервер не отвечает. Попробуй ещё раз.' };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function retryInit() {
@@ -1156,22 +1210,61 @@ function buildMasterActions(req, container) {
 }
 
 async function promptSchedule(requestId) {
-  const input = prompt('Дата сеанса в формате ГГГГ-ММ-ДД (например 2026-12-05):');
-  if (!input) return;
+  // Дата выбирается в самом приложении: встроенный prompt() в Telegram
+  // WebView на части устройств заблокирован, а руками набранную дату
+  // легко перепутать. Свой календарь работает всегда и без опечаток.
+  state.pendingScheduleId = requestId;
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.trim())) {
-    tgAlert('Неверный формат. Нужно так: 2026-12-05');
+  const input = document.getElementById('schedule-date-input');
+  const errEl = document.getElementById('schedule-error');
+
+  if (input) {
+    const now = new Date();
+    const today = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+    input.min = today;
+    input.value = '';
+  }
+  if (errEl) errEl.textContent = '';
+
+  openModal('modal-schedule');
+}
+
+async function confirmScheduleDate() {
+  const input = document.getElementById('schedule-date-input');
+  const errEl = document.getElementById('schedule-error');
+  const value = (input?.value || '').trim();
+
+  const showError = (msg) => {
+    if (errEl) errEl.textContent = msg;
+    tgAlert(msg);
+  };
+
+  if (!value) {
+    showError('Выбери дату');
+    return;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    showError('Неверный формат даты');
+    return;
+  }
+
+  const requestId = state.pendingScheduleId;
+  if (!requestId) {
+    closeModal('modal-schedule');
     return;
   }
 
   haptic('medium');
-  const res = await apiPost(`requests/${requestId}/schedule`, { slot_date: input.trim() });
+  const res = await apiPost(`requests/${requestId}/schedule`, { slot_date: value });
 
   if (!res.ok) {
-    tgAlert(res.error || 'Не получилось назначить дату');
+    showError(res.error || 'Не получилось назначить дату');
     return;
   }
 
+  state.pendingScheduleId = null;
+  closeModal('modal-schedule');
   toast('Дата назначена 📅');
   openMasterCabinet();
 }
@@ -1307,6 +1400,7 @@ const App = {
   openMasterContact,
   openModal,
   closeModal,
+  confirmScheduleDate,
 };
 
 window.App = App;

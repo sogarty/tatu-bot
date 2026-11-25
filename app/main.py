@@ -60,10 +60,15 @@ async def _set_webhook(bot_instance: Bot, url: str, secret: str) -> None:
     max_retries = 5
     for attempt in range(1, max_retries + 1):
         try:
-            result = await bot_instance.set_webhook(
+            await bot_instance.set_webhook(
                 url,
                 secret_token=secret,
-                drop_pending_updates=True,
+                # ВАЖНО: НЕ сбрасываем очередь. На бесплатном хостинге сервис
+                # засыпает и при пробуждении заново вызывает set_webhook.
+                # С drop_pending_updates=True сообщения, отправленные пока
+                # сервис просыпался (например, первое "/start"), УДАЛЯЛИСЬ —
+                # бот молчал, и приходилось писать команду второй раз.
+                drop_pending_updates=False,
             )
             # result — True при успехе
             host = url.split("://", 1)[-1].split("/")[0] if "://" in url else url
@@ -101,6 +106,8 @@ async def lifespan(app: FastAPI):
     # Создаём бота один раз
     bot = _create_bot()
 
+    _webhook_task: asyncio.Task | None = None
+
     if settings.mode == "webhook":
         # Dispatcher нужен ВСЕГДА в webhook-режиме: без него /webhook
         # отвечает 503, и Telegram бесконечно повторяет один и тот же update.
@@ -108,7 +115,13 @@ async def lifespan(app: FastAPI):
 
         if settings.webhook_base_url:
             webhook_url = settings.webhook_base_url.rstrip("/") + "/webhook"
-            await _set_webhook(bot, webhook_url, settings.webhook_secret)
+            # ВАЖНО: установка webhook — фоновая задача. На бесплатном
+            # хостинге контейнер стартует медленно, и если ждать ответа
+            # Telegram, всё приложение (включая Mini App) не отвечает,
+            # пока этот вызов не завершится. Пусть сайт поднимется сразу.
+            _webhook_task = asyncio.create_task(
+                _set_webhook(bot, webhook_url, settings.webhook_secret)
+            )
         else:
             logger.warning(
                 "WEBHOOK_BASE_URL не задан — webhook не устанавливается. "
@@ -124,6 +137,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── shutdown ─────────────────────────────────────────────────────────
+    if _webhook_task and not _webhook_task.done():
+        _webhook_task.cancel()
     if bot:
         await bot.session.close()
         logger.info("Сессия бота закрыта")
@@ -156,8 +171,33 @@ app.include_router(admin_router, prefix="/api/v1")
 # ─── Mini App статика ──────────────────────────────────────────────────────
 # main.py лежит в deploy/app/, а папка web — в deploy/. Отсюда parent.parent.
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
 if _WEB_DIR.is_dir():
-    app.mount("/app", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")
+
+    class NoCacheStaticFiles(StaticFiles):
+        """Статика Mini App с запретом кэширования.
+
+        Telegram открывает приложение во встроенном браузере, который
+        агрессивно кэширует app.js и style.css. Без этого заголовка человек
+        после нашего исправления ещё долго видел бы СТАРЫЙ сломанный код —
+        и любая правка «не доходила» бы до него. Для маленького приложения
+        честнее всегда отдавать свежую версию.
+        """
+
+        async def get_response(self, path, scope):  # noqa: D102
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = (
+                "no-cache, no-store, must-revalidate, max-age=0"
+            )
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
+
+    app.mount(
+        "/app",
+        NoCacheStaticFiles(directory=str(_WEB_DIR), html=True),
+        name="web",
+    )
     logger.info("Mini App подключён: %s", _WEB_DIR)
 else:
     logger.error(

@@ -1,0 +1,45 @@
+# Конфигурация сервиса на Render.
+#
+# Зачем этот файл: он делает развёртывание повторяемым и явным. Без него
+# настройки живут только в панели Render, их легко случайно сломать, и
+# непонятно, что именно запущено.
+#
+# ВАЖНО про данные: на бесплатном тарифе диск временный — база SQLite
+# стирается при каждом перезапуске. Поэтому для настоящей работы нужен
+# PostgreSQL (Neon). Пока DATABASE_URL не задан, приложение работает на
+# SQLite и данные теряются после перезапуска/сна. Это ожидаемо.
+#
+# Секреты сюда НЕ пишутся: sync: false означает «значение задаётся в панели
+# Render, в репозитории его нет».
+
+services:
+  - type: web
+    name: tatu-bot
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: MASTER_TG_ID
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: WEBHOOK_BASE_URL
+        sync: false
+      - key: WEBAPP_URL
+        sync: false
+      - key: MODE
+        value: webhook
+      - key: ENVIRONMENT
+        value: production
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      # Для постоянного хранения данных задайте строку подключения Neon
+      # (postgresql+asyncpg://...). Пока пусто — используется SQLite.
+      - key: DATABASE_URL
+        sync: false
