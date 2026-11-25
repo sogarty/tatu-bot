@@ -26,8 +26,8 @@ def upgrade() -> None:
         sa.Column("username", sa.String(32), nullable=True),
         sa.Column("first_name", sa.String(100), nullable=False),
         sa.Column("last_name", sa.String(100), nullable=True),
-        sa.Column("is_regular", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-        sa.Column("is_active", sa.Boolean(), server_default=sa.text("true"), nullable=False),
+        sa.Column("is_regular", sa.Boolean(), server_default=sa.false(), nullable=False),
+        sa.Column("is_active", sa.Boolean(), server_default=sa.true(), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(),
@@ -77,7 +77,7 @@ def upgrade() -> None:
         sa.Column("size", sa.String(50), nullable=False),
         sa.Column("color_mode", sa.String(10), nullable=False),
         sa.Column(
-            "is_urgent", sa.Boolean(), server_default=sa.text("false"), nullable=False
+            "is_urgent", sa.Boolean(), server_default=sa.false(), nullable=False
         ),
         sa.Column("urgent_surcharge", sa.Numeric(10, 2), nullable=True),
         sa.Column("status", sa.String(20), nullable=False, server_default="draft"),
@@ -103,7 +103,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column(
-            "is_archived", sa.Boolean(), server_default=sa.text("false"), nullable=False
+            "is_archived", sa.Boolean(), server_default=sa.false(), nullable=False
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.CheckConstraint(
@@ -173,7 +173,7 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), autoincrement=True, nullable=False),
         sa.Column("slot_date", sa.Date(), nullable=False),
         sa.Column(
-            "is_blocked", sa.Boolean(), server_default=sa.text("false"), nullable=False
+            "is_blocked", sa.Boolean(), server_default=sa.false(), nullable=False
         ),
         sa.Column("master_note", sa.Text(), nullable=True),
         sa.Column(

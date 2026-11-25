@@ -1,26 +1,32 @@
 /* ===================================================
-   TATU BOT — Telegram Mini App (app.js)
-   Production-ready vanilla JS, no dependencies.
+   TATU — Telegram Mini App (app.js)
+   Без зависимостей. Работает внутри Telegram.
    =================================================== */
+
+'use strict';
 
 /* ===================================================
    CONFIG
    =================================================== */
 
-/*
- * API_BASE — относительный путь к API.
- * Работает и на Render, и локально, и при открытии в браузере.
- */
 const API_BASE = '/api/v1/';
 
+// Мастер-контакт вынесен сюда: поменять — одно место.
+const MASTER_TELEGRAM = 'https://t.me/aritu_tattoo';
+
 const STATUS_MAP = {
-  new:        { text: 'В очереди',   icon: '⏳', cssClass: 'new' },
-  accepted:   { text: 'Принята',     icon: '✅', cssClass: 'accepted' },
-  in_progress:{ text: 'Создаётся',  icon: '🖌',  cssClass: 'in_progress' },
-  scheduled:  { text: 'Записана',    icon: '📅', cssClass: 'scheduled' },
-  completed:  { text: 'Завершена',   icon: '✨', cssClass: 'completed' },
-  rejected:   { text: 'Отклонена',   icon: '❌', cssClass: 'rejected' },
+  draft:       { text: 'Черновик',   icon: '📝', cssClass: 'new' },
+  new:         { text: 'В очереди',  icon: '⏳', cssClass: 'new' },
+  accepted:    { text: 'Принята',    icon: '✅', cssClass: 'accepted' },
+  in_progress: { text: 'Создаётся',  icon: '🖌',  cssClass: 'in_progress' },
+  scheduled:   { text: 'Записана',   icon: '📅', cssClass: 'scheduled' },
+  completed:   { text: 'Завершена',  icon: '✨', cssClass: 'completed' },
+  rejected:    { text: 'Отклонена',  icon: '❌', cssClass: 'rejected' },
+  cancelled:   { text: 'Отменена',   icon: '🚫', cssClass: 'rejected' },
 };
+
+const COLOR_LABELS = { bw: 'Чёрно-белая', color: 'Цветная' };
+const URGENCY_LABELS = { yes: 'Да, срочно', no: 'Нет, обычная очередь' };
 
 const BRIEF_LABELS = {
   experience_level: 'Опыт',
@@ -29,226 +35,47 @@ const BRIEF_LABELS = {
   importance: 'Важнее всего',
 };
 
-const COLOR_LABELS = { bw: 'Чёрно-белая', color: 'Цветная' };
-const URGENCY_LABELS = { yes: 'Да, срочно', no: 'Нет, обычная очередь' };
-
-/* ===================================================
-   STATE — FSM data
-   =================================================== */
-const state = {
-  user: null,           // TG user data
-  settings: null,       // bot settings
-  requests: [],         // user requests list
-  currentStep: 1,       // 1–8
-  draft: {
-    description: '',
-    references: [],          // {fileId, dataUrl}
-    location: '',
-    size: '',
-    colorMode: '',           // 'bw' | 'color'
-    isUrgent: '',            // 'yes' | 'no' | ''
-    urgentSurcharge: 0,
-    brief: {
-      experience_level: '',
-      preferred_style: '',
-      otherStyle: '',
-      inspiration_source: '',
-      importance: '',
-    },
+const BRIEF_VALUES = {
+  experience_level: { none: 'Нет, первая', few: 'Была 1–2', many: 'Было 3+' },
+  preferred_style: {
+    realism: 'Реализм', graphics: 'Графика', watercolor: 'Акварель',
+    geometry: 'Геометрия', other: 'Свой вариант',
   },
-  calendarYear: new Date().getFullYear(),
-  calendarMonth: new Date().getMonth(), // 0-indexed
-  calendarSlots: {}, // { 'YYYY-MM-DD': { is_blocked, ... } }
-  editingRequestId: null,
+  inspiration_source: {
+    pinterest: 'Pinterest', instagram: 'Instagram',
+    own: 'Свои референсы', dontknow: 'Не знаю',
+  },
+  importance: { aesthetics: 'Эстетика', meaning: 'Смысл', safety: 'Безопасность' },
 };
 
+const TOTAL_STEPS = 7;
+
+// Сколько ждём ответ сервера. Дольше держать человека на спиннере нельзя.
+const REQUEST_TIMEOUT_MS = 20000;
+
 /* ===================================================
-   TELEGRAM WEBAPP HELPERS
+   STATE
    =================================================== */
+
 const tg = window.Telegram?.WebApp;
 
-function initTelegram() {
-  if (!tg) {
-    console.warn('Telegram WebApp not available');
-    return;
-  }
-  tg.ready();
-  tg.expand();
+const state = {
+  ready: false,
+  me: null,             // { user_id, is_admin, first_name }
+  settings: null,
+  requests: [],
+  masterRequests: [],
+  currentStep: 1,
+  draft: null,
+  calendarYear: new Date().getFullYear(),
+  calendarMonth: new Date().getMonth(),
+  calendarSlots: {},
+  lastRequestId: null,
+};
 
-  // Apply telegram theme if available
-  if (tg.themeParams.bg_color) {
-    document.body.style.backgroundColor = tg.themeParams.bg_color || '#F8F8FA';
-  }
-
-  // Parse user data
-  const initData = tg.initDataUnsafe || {};
-  const user = initData.user || initData.query_id;
-
-  if (user) {
-    state.user = {
-      id: user.id,
-      tg_id: user.id,
-      first_name: user.first_name || 'Клиент',
-      last_name: user.last_name || '',
-      username: user.username || '',
-      display_name: [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Клиент',
-    };
-  }
-
-  // Save to localStorage as fallback
-  if (state.user) {
-    localStorage.setItem('tatu_user', JSON.stringify(state.user));
-  }
-}
-
-function gettgId() {
-  return state.user?.tg_id || localStorage.getItem('tatu_user') ? JSON.parse(localStorage.getItem('tatu_user')).tg_id : null;
-}
-
-function haptic(type) {
-  if (tg?.HapticFeedback) {
-    try {
-      const impactMap = {
-        light: 'lightImpact',
-        medium: 'mediumImpact',
-        heavy: 'heavyImpact',
-      };
-      tg.HapticFeedback.impactOccurred(impactMap[type] || 'light');
-    } catch (e) {
-      // Fallback
-    }
-  }
-}
-
-/* ===================================================
-   API CLIENT
-   =================================================== */
-async function apiGet(endpoint) {
-  try {
-    const res = await fetch(API_BASE + endpoint, {
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.error('API GET error:', err);
-    return null;
-  }
-}
-
-async function apiPost(endpoint, body) {
-  try {
-    const res = await fetch(API_BASE + endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.error('API POST error:', err);
-    return null;
-  }
-}
-
-async function apiPatch(endpoint, body) {
-  try {
-    const res = await fetch(API_BASE + endpoint, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.error('API PATCH error:', err);
-    return null;
-  }
-}
-
-/* ===================================================
-   NAVIGATION — Screen routing
-   =================================================== */
-function showScreen(screenId) {
-  // Hide all screens
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  // Show target
-  const target = document.getElementById('screen-' + screenId);
-  if (target) {
-    target.classList.add('active');
-    // Scroll to top
-    window.scrollTo(0, 0);
-  }
-
-  // Show/hide bottom nav
-  const hideNavScreens = ['screen-request-form', 'screen-loading'];
-  const bottomNav = document.getElementById('bottom-nav');
-  if (hideNavScreens.includes('screen-' + screenId)) {
-    bottomNav?.classList.add('hidden');
-  } else {
-    bottomNav?.classList.remove('hidden');
-  }
-}
-
-/* ===================================================
-   HOME SCREEN
-   =================================================== */
-async function initHome() {
-  showScreen('home');
-  updateBottomNav('screen-home');
-
-  // Greeting
-  const name = state.user?.display_name || state.user?.first_name || 'Клиент';
-  document.getElementById('greeting-text').textContent = `✨ Привет, ${name}!`;
-  document.getElementById('home-subtitle').textContent =
-    'Добро пожаловать в мой личный бот. Здесь ты можешь оставить заявку на эскиз.';
-
-  // Fetch settings
-  if (!state.settings) {
-    state.settings = await apiGet('settings');
-  }
-
-  // Fetch user requests to show last one
-  const userId = gettgId();
-  if (userId) {
-    const reqs = await apiGet(`requests?user_id=${userId}&limit=1`);
-    if (reqs && reqs.length > 0) {
-      const last = reqs[0];
-      showLastRequest(last);
-    }
-  }
-}
-
-function showLastRequest(req) {
-  const card = document.getElementById('home-last-request');
-  const statusEl = document.getElementById('last-request-status');
-  const infoEl = document.getElementById('last-request-info');
-
-  const status = STATUS_MAP[req.status] || STATUS_MAP.new;
-  statusEl.className = `status-badge ${status.cssClass}`;
-  statusEl.textContent = `${status.icon} ${status.text}`;
-
-  infoEl.textContent = `#${req.id} — ${req.description?.substring(0, 40) || 'Заявка'}...`;
-
-  card.classList.remove('hidden');
-}
-
-/* ===================================================
-   REQUEST FORM — FSM (8 steps)
-   =================================================== */
-function startNewRequest() {
-  haptic('light');
-  resetDraft();
-  state.currentStep = 1;
-  renderStep();
-  showScreen('request-form');
-  updateBottomNav(null);
-}
-
-function resetDraft() {
-  state.draft = {
+function emptyDraft() {
+  return {
     description: '',
-    references: [],
     location: '',
     size: '',
     colorMode: '',
@@ -262,529 +89,566 @@ function resetDraft() {
       importance: '',
     },
   };
-  state.currentStep = 1;
+}
 
-  // Clear form fields
-  document.getElementById('field-description').value = '';
+/* ===================================================
+   TELEGRAM
+   =================================================== */
+
+function haptic(type) {
+  try {
+    const map = { light: 'lightImpact', medium: 'mediumImpact', heavy: 'heavyImpact' };
+    tg?.HapticFeedback?.impactOccurred(map[type] || 'light');
+  } catch (e) { /* не критично */ }
+}
+
+function tgAlert(message) {
+  if (tg?.showAlert) { tg.showAlert(message); return; }
+  toast(message);
+}
+
+function toast(message, ms = 2600) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove('hidden');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.add('hidden'), ms);
+}
+
+function initTelegram() {
+  if (tg) {
+    try {
+      tg.ready();
+      tg.expand();
+      tg.setHeaderColor?.('#F8F8FA');
+      tg.setBackgroundColor?.('#F8F8FA');
+      tg.BackButton?.hide?.();
+    } catch (e) { /* не критично */ }
+  }
+}
+
+/* ===================================================
+   API
+   =================================================== */
+
+function authHeader() {
+  // Telegram кладёт подписанную строку в initData.
+  // Без неё сервер не может доверять запросу.
+  const raw = tg?.initData || '';
+  return raw ? { Authorization: 'TelegramWebApp ' + raw } : {};
+}
+
+async function apiFetch(endpoint, options = {}) {
+  const headers = Object.assign(
+    { 'Content-Type': 'application/json' },
+    authHeader(),
+    options.headers || {}
+  );
+
+  let res;
+  try {
+    // Таймаут обязателен: на мобильной связи запрос может «висеть» вечно,
+    // и человек останется навсегда на экране загрузки.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      res = await fetch(API_BASE + endpoint, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    const timeout = err && err.name === 'AbortError';
+    return {
+      ok: false,
+      status: 0,
+      error: timeout ? 'Сервер не отвечает. Попробуй ещё раз.' : 'Нет связи с сервером',
+      data: null,
+    };
+  }
+
+  let data = null;
+  const text = await res.text();
+  if (text) {
+    try { data = JSON.parse(text); } catch (e) { data = null; }
+  }
+
+  if (!res.ok) {
+    const detail =
+      (data && (typeof data.detail === 'string' ? data.detail : null)) ||
+      (res.status === 401 ? 'Открой приложение из Telegram' : `Ошибка ${res.status}`);
+    return { ok: false, status: res.status, error: detail, data };
+  }
+
+  return { ok: true, status: res.status, error: null, data };
+}
+
+const apiGet = (endpoint) => apiFetch(endpoint, { method: 'GET' });
+const apiPost = (endpoint, body) =>
+  apiFetch(endpoint, { method: 'POST', body: JSON.stringify(body || {}) });
+
+/* ===================================================
+   NAVIGATION
+   =================================================== */
+
+function showScreen(screenId) {
+  const id = screenId.startsWith('screen-') ? screenId : 'screen-' + screenId;
+
+  document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
+  const target = document.getElementById(id);
+  if (target) target.classList.add('active');
+
+  window.scrollTo(0, 0);
+
+  const hideNav = ['screen-request-form', 'screen-loading', 'screen-error', 'screen-success'];
+  const nav = document.getElementById('bottom-nav');
+  if (nav) nav.classList.toggle('hidden', hideNav.includes(id));
+
+  updateBottomNav(id === 'screen-my-requests' ? 'screen-my-requests' : id);
+}
+
+function updateBottomNav(activeScreen) {
+  document.querySelectorAll('#bottom-nav .nav-item').forEach((item) => {
+    item.classList.toggle('active', item.dataset.screen === activeScreen);
+  });
+}
+
+function showFatal(title, text) {
+  document.getElementById('error-title').textContent = title;
+  document.getElementById('error-text').textContent = text;
+  showScreen('screen-error');
+}
+
+/* ===================================================
+   INIT
+   =================================================== */
+
+async function init() {
+  initTelegram();
+  showScreen('screen-loading');
+
+  if (!tg || !tg.initData) {
+    // Открыли в обычном браузере: работаем в режиме просмотра.
+    showFatal(
+      'Открой приложение из Telegram',
+      'Показывать и создавать заявки можно только внутри Telegram — тогда сервер знает, кто ты.'
+    );
+    return;
+  }
+
+  try {
+    const res = await apiGet('me');
+    if (!res.ok) {
+      showFatal('Не удалось войти', res.error || 'Проверь связь и попробуй снова.');
+      return;
+    }
+
+    state.me = res.data;
+    state.ready = true;
+  } catch (err) {
+    // Любой неожиданный сбой не должен оставлять человека на спиннере.
+    showFatal('Что-то пошло не так', 'Попробуй открыть приложение ещё раз.');
+    return;
+  }
+
+  // Показываем вход в кабинет только мастеру
+  const masterBlock = document.getElementById('home-master-block');
+  if (masterBlock) masterBlock.style.display = state.me.is_admin ? '' : 'none';
+
+  await goHome();
+}
+
+async function retryInit() {
+  await init();
+}
+
+/* ===================================================
+   HOME
+   =================================================== */
+
+async function goHome() {
+  haptic('light');
+  showScreen('screen-home');
+
+  const name = state.me?.first_name || 'Клиент';
+  document.getElementById('greeting-text').textContent = `✨ Привет, ${name}!`;
+  document.getElementById('home-subtitle').textContent =
+    'Здесь можно оставить заявку на эскиз и следить за её статусом.';
+
+  if (!state.settings) {
+    const s = await apiGet('settings');
+    state.settings = s.ok ? s.data : {};
+  }
+
+  applyUrgentPrice();
+
+  const reqs = await apiGet('requests?limit=1');
+  if (reqs.ok && Array.isArray(reqs.data) && reqs.data.length > 0) {
+    showLastRequest(reqs.data[0]);
+  } else {
+    document.getElementById('home-last-request').classList.add('hidden');
+  }
+}
+
+function showLastRequest(req) {
+  const status = STATUS_MAP[req.status] || STATUS_MAP.new;
+
+  const statusEl = document.getElementById('last-request-status');
+  statusEl.className = `status-badge ${status.cssClass}`;
+  statusEl.textContent = `${status.icon} ${status.text}`;
+
+  document.getElementById('last-request-info').textContent =
+    `#${req.id} — ${(req.description || 'Заявка').slice(0, 40)}…`;
+
+  state.lastRequestId = req.id;
+  document.getElementById('home-last-request').classList.remove('hidden');
+}
+
+function openLastRequest() {
+  if (state.lastRequestId) openRequestDetail(state.lastRequestId);
+}
+
+/** Показывает цену за срочность из настроек (если мастер её задал). */
+function applyUrgentPrice() {
+  const price = Number(state.settings?.urgent_price || 0);
+  const label = document.getElementById('urgent-price-label');
+  if (!label) return;
+  label.textContent = price > 0 ? `${price} ₽` : 'уточняется';
+}
+
+/* ===================================================
+   REQUEST FORM
+   =================================================== */
+
+function startNewRequest() {
+  haptic('light');
+  state.draft = emptyDraft();
+  state.currentStep = 1;
+  resetFormFields();
+  applyUrgentPrice();
+  renderStep();
+  showScreen('screen-request-form');
+}
+
+/** Есть ли уже что-то введённое в текущей форме. */
+function hasDraftContent() {
+  const d = state.draft;
+  if (!d) return false;
+  return Boolean(
+    d.description ||
+      d.location ||
+      d.size ||
+      d.colorMode ||
+      d.isUrgent ||
+      Object.values(d.brief || {}).some(Boolean)
+  );
+}
+
+/**
+ * Навигация из нижнего меню: не теряем уже введённую заявку молча.
+ * Если форма заполнена — спрашиваем подтверждение.
+ */
+function navNewRequest() {
+  if (hasDraftContent() && !confirm('Начать новую заявку? Введённое не сохранится.')) {
+    return;
+  }
+  startNewRequest();
+}
+
+function resetFormFields() {
+  const desc = document.getElementById('field-description');
+  if (desc) desc.value = '';
   document.getElementById('desc-count').textContent = '0';
   document.getElementById('field-location').value = '';
   document.getElementById('field-size').value = '';
-  document.getElementById('references-preview').innerHTML = '';
-  document.getElementById('ref-counter').textContent = 'Принято: 0 из 5';
-
-  // Clear selections
-  document.querySelectorAll('.color-option, .urgency-option, .chip, .brief-option').forEach(el => {
-    el.classList.remove('selected');
-  });
-
-  // Hide brief questions
-  for (let i = 1; i <= 4; i++) {
-    const el = document.getElementById(`brief-q${i}`);
-    if (el) el.classList.add('hidden');
-  }
+  document.getElementById('field-brief-other').value = '';
   document.getElementById('brief-other-field').classList.add('hidden');
+
+  document
+    .querySelectorAll('.color-option, .urgency-option, .chip, .brief-option')
+    .forEach((el) => el.classList.remove('selected'));
+
+  document.querySelectorAll('.error-message').forEach((el) => {
+    el.classList.add('hidden');
+    el.textContent = '';
+  });
+}
+
+function cancelRequestForm() {
+  haptic('light');
+  // Подтверждение нужно всегда, когда уже что-то введено —
+  // даже если человек вернулся на первый шаг.
+  if (!hasDraftContent() || confirm('Отменить создание заявки? Введённое не сохранится.')) {
+    state.draft = null;
+    goHome();
+  }
 }
 
 function renderStep() {
   const step = state.currentStep;
-  const totalSteps = 8;
 
-  // Update progress
-  document.getElementById('step-label').textContent = `Шаг ${step} из ${totalSteps}`;
-  document.getElementById('progress-fill').style.width = `${(step / totalSteps) * 100}%`;
+  document.getElementById('step-label').textContent = `Шаг ${step} из ${TOTAL_STEPS}`;
+  document.getElementById('progress-fill').style.width = `${(step / TOTAL_STEPS) * 100}%`;
 
-  // Show/hide steps
-  document.querySelectorAll('.form-step').forEach(s => s.classList.remove('active'));
-  const stepEl = document.getElementById(`step-${step}`);
-  if (stepEl) stepEl.classList.add('active');
+  document.querySelectorAll('.form-step').forEach((s) => s.classList.remove('active'));
+  document.getElementById(`step-${step}`)?.classList.add('active');
 
-  // Nav buttons
   const btnBack = document.getElementById('btn-back');
   const btnNext = document.getElementById('btn-next');
 
-  if (step === 1) {
-    btnBack.disabled = true;
-    btnBack.style.opacity = '0.4';
-  } else {
-    btnBack.disabled = false;
-    btnBack.style.opacity = '1';
-  }
+  btnBack.disabled = step === 1;
+  btnBack.style.opacity = step === 1 ? '0.4' : '1';
 
-  // Update next button text
-  if (step === 8) {
-    btnNext.textContent = '✉️ Отправить заявку';
-    btnNext.classList.add('btn-accent');
-  } else if (step === 7) {
-    btnNext.textContent = 'Далее →';
-  } else {
-    btnNext.textContent = 'Далее →';
-  }
+  // На последнем шаге кнопка ведёт к отправке, а не «далее»
+  btnNext.textContent = step === TOTAL_STEPS ? '✉️ Отправить заявку' : 'Далее →';
 
-  // Load urgent price
-  const urgentLabel = document.getElementById('urgent-price-label');
-  const surchargeEl = document.getElementById('surcharge-amount');
-  if (state.settings?.urgent_price) {
-    urgentLabel.textContent = `${state.settings.urgent_price} ₽`;
-    surchargeEl.textContent = `${state.settings.urgent_price} ₽`;
-  }
+  if (step === TOTAL_STEPS) renderReviewCard();
 }
 
-async function nextStep() {
+function nextStep() {
   haptic('light');
-
-  // Validate current step before advancing
   if (!validateCurrentStep()) return;
 
-  // Save draft between steps
-  saveDraftToStorage();
-
-  if (state.currentStep === 7) {
-    // Step 7 is brief — auto-advance through brief questions
-    await renderBriefAutoAdvance();
+  if (state.currentStep === TOTAL_STEPS) {
+    submitRequest();
     return;
   }
 
-  state.currentStep = Math.min(state.currentStep + 1, 8);
+  state.currentStep += 1;
   renderStep();
 }
 
 function prevStep() {
   haptic('light');
-
   if (state.currentStep <= 1) return;
-
-  // If we're in brief questions, go back to step 7
-  if (state.currentStep === 7) {
-    state.currentStep = 6;
-    renderStep();
-    return;
-  }
-
-  state.currentStep--;
+  state.currentStep -= 1;
   renderStep();
 }
 
 function validateCurrentStep() {
   const step = state.currentStep;
-  let valid = true;
 
-  // Hide all errors first
-  document.querySelectorAll('.error-message').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.error-message').forEach((el) => {
+    el.classList.add('hidden');
+    el.textContent = '';
+  });
 
-  switch (step) {
-    case 1: {
-      const desc = document.getElementById('field-description').value.trim();
-      if (desc.length < 10) {
-        showError('description', 'Расскажи чуть подробнее, это поможет мастеру понять твою идею');
-        shakeField('field-description');
-        valid = false;
-      } else {
-        state.draft.description = desc;
-      }
-      break;
+  if (step === 1) {
+    const desc = document.getElementById('field-description').value.trim();
+    if (desc.length < 10) {
+      showError('description', 'Расскажи чуть подробнее — минимум 10 символов');
+      shakeField('field-description');
+      return false;
     }
-    case 2: {
-      // References are optional but recommended
-      break;
-    }
-    case 3: {
-      const loc = document.getElementById('field-location').value.trim();
-      if (loc.length < 3) {
-        showError('location', 'Укажи место — минимум 3 символа');
-        shakeField('field-location');
-        valid = false;
-      } else {
-        state.draft.location = loc;
-      }
-      break;
-    }
-    case 4: {
-      const size = document.getElementById('field-size').value.trim();
-      if (!size) {
-        showError('size', 'Укажи размер татуировки');
-        shakeField('field-size');
-        valid = false;
-      } else {
-        state.draft.size = size;
-      }
-      break;
-    }
-    case 5: {
-      if (!state.draft.colorMode) {
-        showError('color', 'Выбери цветовой вариант');
-        valid = false;
-      }
-      break;
-    }
-    case 6: {
-      if (!state.draft.isUrgent) {
-        showError('urgency', 'Выбери вариант срочности');
-        valid = false;
-      } else {
-        state.draft.urgentSurcharge = state.draft.isUrgent === 'yes' && state.settings?.urgent_price
-          ? Number(state.settings.urgent_price) : 0;
-        const surchargeEl = document.getElementById('urgent-surcharge');
-        if (state.draft.isUrgent === 'yes') {
-          surchargeEl.classList.remove('hidden');
-        } else {
-          surchargeEl.classList.add('hidden');
-        }
-      }
-      break;
-    }
-    case 7: {
-      // Brief — any combination is acceptable, skipping validation
-      break;
-    }
-    case 8: {
-      // Review step — no validation needed
-      renderReviewCard();
-      break;
-    }
+    state.draft.description = desc;
   }
 
-  return valid;
+  if (step === 2) {
+    const loc = document.getElementById('field-location').value.trim();
+    if (loc.length < 3) {
+      showError('location', 'Укажи место — минимум 3 символа');
+      shakeField('field-location');
+      return false;
+    }
+    state.draft.location = loc;
+  }
+
+  if (step === 3) {
+    const size = document.getElementById('field-size').value.trim();
+    if (!size) {
+      showError('size', 'Укажи размер татуировки');
+      shakeField('field-size');
+      return false;
+    }
+    state.draft.size = size;
+  }
+
+  if (step === 4 && !state.draft.colorMode) {
+    showError('color', 'Выбери цветовой вариант');
+    return false;
+  }
+
+  if (step === 5 && !state.draft.isUrgent) {
+    showError('urgency', 'Выбери вариант срочности');
+    return false;
+  }
+
+  // Шаг 6 (анкета) — необязательный
+  return true;
 }
 
 function showError(fieldId, message) {
-  const errorEl = document.getElementById(`error-${fieldId}`);
-  if (errorEl) {
-    errorEl.textContent = message;
-    errorEl.classList.remove('hidden');
+  const el = document.getElementById(`error-${fieldId}`);
+  if (el) {
+    el.textContent = message;
+    el.classList.remove('hidden');
   }
 }
 
 function shakeField(fieldId) {
-  const field = document.getElementById(fieldId);
-  if (field) {
-    field.classList.add('shake');
-    setTimeout(() => field.classList.remove('shake'), 500);
-  }
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  el.classList.add('shake');
+  setTimeout(() => el.classList.remove('shake'), 500);
 }
 
 /* ===================================================
-   BRIEF — Auto-advance through 4 questions
+   FORM CONTROLS
    =================================================== */
-async function renderBriefAutoAdvance() {
-  const brief = state.draft.brief;
-  const questions = ['brief-q1', 'brief-q2', 'brief-q3', 'brief-q4'];
 
-  // Show first question
-  let qIndex = 0;
-
-  function showQuestion(idx) {
-    // Hide all questions
-    questions.forEach(q => {
-      const el = document.getElementById(q);
-      if (el) el.classList.add('hidden');
-    });
-
-    if (idx >= questions.length) {
-      // All questions answered, move to step 8
-      state.currentStep = 8;
-      renderStep();
-      return;
-    }
-
-    const qEl = document.getElementById(questions[idx]);
-    if (qEl) qEl.classList.remove('hidden');
-  }
-
-  showQuestion(0);
-
-  // Attach click handlers dynamically
-  const attachHandlers = () => {
-    questions.forEach((qId, idx) => {
-      const qEl = document.getElementById(qId);
-      if (!qEl) return;
-
-      const options = qEl.querySelectorAll('.brief-option');
-      options.forEach(opt => {
-        // Remove old listeners (remove all cloned children, re-attach)
-        opt.replaceWith(opt.cloneNode(true));
-      });
-
-      // Re-query after cloning
-      const freshOptions = qEl.querySelectorAll('.brief-option');
-      freshOptions.forEach(opt => {
-        opt.addEventListener('click', () => {
-          haptic('light');
-          const value = opt.dataset.value;
-
-          // Selected state
-          freshOptions.forEach(o => o.classList.remove('selected'));
-          opt.classList.add('selected');
-
-          // Save answer
-          if (qId === 'brief-q1') {
-            brief.experience_level = value;
-          } else if (qId === 'brief-q2') {
-            if (value === 'other') {
-              const otherField = document.getElementById('brief-other-field');
-              otherField.classList.remove('hidden');
-              document.getElementById('field-brief-other').focus();
-              return; // Don't advance, wait for input
-            } else {
-              brief.preferred_style = value;
-            }
-          } else if (qId === 'brief-q3') {
-            brief.inspiration_source = value;
-          } else if (qId === 'brief-q4') {
-            brief.importance = value;
-          }
-
-          // Auto-advance after short delay
-          setTimeout(() => {
-            showQuestion(idx + 1);
-          }, 250);
-        });
-      });
-    });
-  };
-
-  attachHandlers();
-
-  // Handle "other" style input
-  const otherInput = document.getElementById('field-brief-other');
-  otherInput.addEventListener('input', () => {
-    brief.otherStyle = otherInput.value.trim();
+function initFormControls() {
+  const desc = document.getElementById('field-description');
+  desc?.addEventListener('input', () => {
+    document.getElementById('desc-count').textContent = desc.value.length;
   });
 
-  // Check if "other" was already filled, auto-advance when user types
-  otherInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && otherInput.value.trim()) {
-      haptic('light');
-      brief.preferred_style = 'other';
-      brief.otherStyle = otherInput.value.trim();
-      setTimeout(() => showQuestion(2), 250);
-    }
-  });
-}
-
-/* ===================================================
-   REFERENCES (Step 2)
-   =================================================== */
-function initReferences() {
-  const dropZone = document.getElementById('drop-zone');
-  const fileInput = document.getElementById('file-input');
-
-  // Click to upload
-  dropZone.addEventListener('click', (e) => {
-    if (e.target.closest('.remove-ref')) return;
-    fileInput.click();
-  });
-
-  fileInput.addEventListener('change', (e) => {
-    handleFiles(e.target.files);
-    fileInput.value = '';
-  });
-
-  // Drag & drop
-  dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('dragover');
-  });
-
-  dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('dragover');
-  });
-
-  dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('dragover');
-    handleFiles(e.dataTransfer.files);
-  });
-}
-
-function handleFiles(files) {
-  const maxFiles = 5;
-  const remaining = maxFiles - state.draft.references.length;
-
-  if (remaining <= 0) {
-    showToast('Максимум 5 референсов');
-    return;
-  }
-
-  Array.from(files).slice(0, remaining).forEach(file => {
-    if (!file.type.startsWith('image/')) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const ref = {
-        fileId: null, // will be set after upload
-        dataUrl: e.target.result,
-        name: file.name,
-      };
-      state.draft.references.push(ref);
-      renderReferences();
-      haptic('light');
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-function renderReferences() {
-  const container = document.getElementById('references-preview');
-  const refs = state.draft.references;
-
-  container.innerHTML = refs.map((ref, i) => `
-    <div class="reference-thumb" data-index="${i}">
-      <img src="${ref.dataUrl}" alt="Референс ${i + 1}">
-      <button class="remove-ref" data-index="${i}" title="Удалить">×</button>
-    </div>
-  `).join('');
-
-  document.getElementById('ref-counter').textContent = `Принято: ${refs.length} из 5`;
-
-  // Attach remove handlers
-  container.querySelectorAll('.remove-ref').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const idx = parseInt(btn.dataset.index);
-      state.draft.references.splice(idx, 1);
-      renderReferences();
-      haptic('medium');
-    });
-  });
-}
-
-/* ===================================================
-   QUICK BUTTONS (chips)
-   =================================================== */
-function initQuickButtons() {
-  document.querySelectorAll('.quick-buttons .chip').forEach(chip => {
+  // Быстрые кнопки места/размера
+  document.querySelectorAll('.quick-buttons .chip').forEach((chip) => {
     chip.addEventListener('click', () => {
       haptic('light');
-      const value = chip.dataset.value;
-
-      // Toggle selection within group
-      chip.closest('.quick-buttons').querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+      const group = chip.closest('.quick-buttons');
+      group.querySelectorAll('.chip').forEach((c) => c.classList.remove('selected'));
       chip.classList.add('selected');
 
-      // Fill the associated input
-      const fieldId = chip.closest('.form-step').querySelector('input[type="text"]')?.id;
-      if (fieldId) {
-        document.getElementById(fieldId).value = value;
-      }
+      const input = chip.closest('.form-step')?.querySelector('input[type="text"]');
+      if (input) input.value = chip.dataset.value;
     });
   });
 
-  // Color options
-  document.querySelectorAll('.color-option').forEach(btn => {
+  // Цвет
+  document.querySelectorAll('.color-option').forEach((btn) => {
     btn.addEventListener('click', () => {
       haptic('light');
       state.draft.colorMode = btn.dataset.value;
-      document.querySelectorAll('.color-option').forEach(b => b.classList.remove('selected'));
+      document.querySelectorAll('.color-option').forEach((b) => b.classList.remove('selected'));
       btn.classList.add('selected');
     });
   });
 
-  // Urgency options
-  document.querySelectorAll('.urgency-option').forEach(btn => {
+  // Срочность
+  document.querySelectorAll('.urgency-option').forEach((btn) => {
     btn.addEventListener('click', () => {
       haptic('light');
       state.draft.isUrgent = btn.dataset.value;
-      document.querySelectorAll('.urgency-option').forEach(b => b.classList.remove('selected'));
+      document.querySelectorAll('.urgency-option').forEach((b) => b.classList.remove('selected'));
       btn.classList.add('selected');
 
-      const surchargeEl = document.getElementById('urgent-surcharge');
+      const price = Number(state.settings?.urgent_price || 0);
+      state.draft.urgentSurcharge = btn.dataset.value === 'yes' ? price : 0;
+
+      const box = document.getElementById('urgent-surcharge');
+      box.classList.toggle('hidden', btn.dataset.value !== 'yes');
       if (btn.dataset.value === 'yes') {
-        surchargeEl.classList.remove('hidden');
-      } else {
-        surchargeEl.classList.add('hidden');
+        document.getElementById('surcharge-amount').textContent = price ? `${price} ₽` : 'уточнит мастер';
       }
     });
   });
-}
 
-/* ===================================================
-   REVIEW CARD (Step 8)
-   =================================================== */
-function renderReviewCard() {
-  const draft = state.draft;
+  // Бриф
+  document.querySelectorAll('.brief-option').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      haptic('light');
+      const key = btn.dataset.key;
+      const value = btn.dataset.value;
 
-  document.getElementById('review-description').textContent = draft.description;
+      const group = btn.closest('.brief-options');
+      group.querySelectorAll('.brief-option').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
 
-  // References
-  const refContainer = document.getElementById('review-references');
-  if (draft.references.length > 0) {
-    refContainer.innerHTML = draft.references
-      .map(r => `<img src="${r.dataUrl}" alt="Референс">`)
-      .join('');
-    document.getElementById('review-ref-section').classList.remove('hidden');
-  } else {
-    document.getElementById('review-ref-section').classList.add('hidden');
-  }
+      state.draft.brief[key] = value;
 
-  // Basic info
-  document.getElementById('review-location').textContent = draft.location;
-  document.getElementById('review-size').textContent = draft.size;
-  document.getElementById('review-color').textContent = COLOR_LABELS[draft.colorMode] || 'Не указано';
-  document.getElementById('review-urgency').textContent = URGENCY_LABELS[draft.isUrgent] || 'Не указано';
-
-  // Brief
-  const briefSection = document.getElementById('review-brief-section');
-  const briefContainer = document.getElementById('review-brief');
-  const brief = draft.brief;
-
-  const briefItems = [
-    { key: 'experience_level', label: 'Опыт' },
-    { key: 'preferred_style', label: 'Стиль' },
-    { key: 'inspiration_source', label: 'Вдохновение' },
-    { key: 'importance', label: 'Важнее всего' },
-  ];
-
-  const filledItems = briefItems.filter(item => {
-    const val = brief[item.key];
-    return val && val !== '' && val !== 'other';
+      const otherBox = document.getElementById('brief-other-field');
+      if (key === 'preferred_style' && value === 'other') {
+        otherBox.classList.remove('hidden');
+        document.getElementById('field-brief-other').focus();
+      } else if (key === 'preferred_style') {
+        otherBox.classList.add('hidden');
+        state.draft.brief.otherStyle = '';
+        document.getElementById('field-brief-other').value = '';
+      }
+    });
   });
 
-  if (filledItems.length > 0) {
-    briefSection.classList.remove('hidden');
-    briefContainer.innerHTML = filledItems.map(item => {
-      let value = brief[item.key];
-      if (item.key === 'preferred_style' && value === 'other') {
-        value = brief.otherStyle || 'Другое';
-      }
-      return `<div class="review-brief-item">
-        <span class="label">${item.label}</span>
-        <span class="value">${value}</span>
-      </div>`;
-    }).join('');
-  } else {
-    briefSection.classList.add('hidden');
-  }
+  document.getElementById('field-brief-other')?.addEventListener('input', (e) => {
+    state.draft.brief.otherStyle = e.target.value.trim();
+  });
 }
 
 /* ===================================================
-   EDIT OPTIONS (for step 8)
+   REVIEW
    =================================================== */
+
+function renderReviewCard() {
+  const d = state.draft;
+
+  document.getElementById('review-description').textContent = d.description || '—';
+  document.getElementById('review-location').textContent = d.location || '—';
+  document.getElementById('review-size').textContent = d.size || '—';
+  document.getElementById('review-color').textContent = COLOR_LABELS[d.colorMode] || '—';
+  document.getElementById('review-urgency').textContent = URGENCY_LABELS[d.isUrgent] || '—';
+
+  const brief = d.brief;
+
+  // Если стиль «другое» — подставляем введённый текст
+  const effectiveStyle =
+    brief.preferred_style === 'other'
+      ? (brief.otherStyle || 'Другое')
+      : BRIEF_VALUES.preferred_style[brief.preferred_style] || '';
+
+  const items = [
+    { label: BRIEF_LABELS.experience_level, value: BRIEF_VALUES.experience_level[brief.experience_level] },
+    { label: BRIEF_LABELS.preferred_style, value: effectiveStyle },
+    { label: BRIEF_LABELS.inspiration_source, value: BRIEF_VALUES.inspiration_source[brief.inspiration_source] },
+    { label: BRIEF_LABELS.importance, value: BRIEF_VALUES.importance[brief.importance] },
+  ].filter((i) => i.value);
+
+  const section = document.getElementById('review-brief-section');
+  const container = document.getElementById('review-brief');
+
+  if (items.length === 0) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+  container.innerHTML = items
+    .map(
+      (i) => `<div class="review-brief-item">
+        <span class="label">${escapeHtml(i.label)}</span>
+        <span class="value">${escapeHtml(i.value)}</span>
+      </div>`
+    )
+    .join('');
+}
+
 function showEditOptions() {
   haptic('light');
 
   const overlay = document.createElement('div');
   overlay.className = 'edit-options-overlay';
   overlay.innerHTML = `
-    <div class="edit-options-backdrop" onclick="this.closest('.edit-options-overlay').remove()"></div>
+    <div class="edit-options-backdrop"></div>
     <div class="edit-options-panel">
       <h3>Изменить шаг</h3>
-      ${[1,2,3,4,5,6,7].map(i => `
-        <button class="edit-option-btn" data-step="${i}">
-          <span class="step-num">${i}</span>
-          <span>Шаг ${i}</span>
-        </button>
-      `).join('')}
-    </div>
-  `;
+      ${Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1)
+        .map(
+          (i) => `<button class="edit-option-btn" data-step="${i}">
+            <span class="step-num">${i}</span><span>Шаг ${i}</span></button>`
+        )
+        .join('')}
+    </div>`;
 
   document.body.appendChild(overlay);
 
-  // Attach handlers
-  overlay.querySelectorAll('.edit-option-btn').forEach(btn => {
+  overlay.querySelector('.edit-options-backdrop').addEventListener('click', () => overlay.remove());
+  overlay.querySelectorAll('.edit-option-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const step = parseInt(btn.dataset.step);
+      state.currentStep = Number(btn.dataset.step);
       overlay.remove();
-      state.currentStep = step;
       renderStep();
       haptic('medium');
     });
@@ -792,141 +656,107 @@ function showEditOptions() {
 }
 
 /* ===================================================
-   SUBMIT REQUEST
+   SUBMIT
    =================================================== */
-async function submitRequest() {
-  if (!validateCurrentStep()) return;
 
+let submitting = false;
+
+async function submitRequest() {
+  if (submitting) return;
+
+  // Финальная проверка всех обязательных шагов
+  const saved = state.currentStep;
+  for (const step of [1, 2, 3, 4, 5]) {
+    state.currentStep = step;
+    if (!validateCurrentStep()) {
+      state.currentStep = step;
+      renderStep();
+      return;
+    }
+  }
+  state.currentStep = saved;
+
+  submitting = true;
   haptic('heavy');
 
-  // Show loading
-  const btnNext = document.getElementById('btn-next');
-  const originalText = btnNext.textContent;
-  btnNext.textContent = 'Отправка...';
-  btnNext.disabled = true;
+  const btn = document.getElementById('btn-submit');
+  const original = btn.textContent;
+  btn.textContent = 'Отправка…';
+  btn.disabled = true;
 
-  const userId = gettgId();
-  if (!userId) {
-    showToast('Ошибка: пользователь не найден');
-    btnNext.textContent = originalText;
-    btnNext.disabled = false;
-    return;
-  }
+  const brief = {
+    experience_level: state.draft.brief.experience_level || null,
+    preferred_style:
+      state.draft.brief.preferred_style === 'other'
+        ? (state.draft.brief.otherStyle || 'other')
+        : (state.draft.brief.preferred_style || null),
+    inspiration_source: state.draft.brief.inspiration_source || null,
+    importance: state.draft.brief.importance || null,
+  };
 
-  // Build payload
+  Object.keys(brief).forEach((k) => {
+    if (!brief[k]) delete brief[k];
+  });
+
   const payload = {
-    user_id: userId,
     description: state.draft.description,
     location: state.draft.location,
     size: state.draft.size,
     color_mode: state.draft.colorMode,
     is_urgent: state.draft.isUrgent === 'yes',
-    urgent_surcharge: state.draft.urgentSurcharge,
-    brief_answers: state.draft.brief,
+    urgent_surcharge: state.draft.urgentSurcharge || null,
+    brief_answers: Object.keys(brief).length ? brief : null,
   };
 
-  // Step 1: Create draft
-  const draft = await apiPost('requests', payload);
-  if (!draft) {
-    showToast('Не удалось создать заявку. Проверьте соединение.');
-    btnNext.textContent = originalText;
-    btnNext.disabled = false;
+  const res = await apiPost('requests', payload);
+
+  submitting = false;
+  btn.textContent = original;
+  btn.disabled = false;
+
+  if (!res.ok) {
+    tgAlert('Не удалось отправить заявку: ' + (res.error || 'ошибка'));
     return;
   }
 
-  // Step 2: Finalize (draft → new)
-  const finalized = await apiPost(`requests/${draft.id}/finalize`, {});
-  if (!finalized) {
-    showToast('Не удалось отправить заявку. Попробуйте ещё раз.');
-    btnNext.textContent = originalText;
-    btnNext.disabled = false;
-    return;
-  }
-
-  // Save draft to storage
-  saveDraftToStorage();
-
-  // Show success
-  btnNext.textContent = originalText;
-  btnNext.disabled = false;
-
-  // Confetti!
   launchConfetti();
-
-  // Show success screen
-  document.getElementById('success-request-id').textContent = `Заявка #${draft.id} отправлена!`;
-  showScreen('success');
-  updateBottomNav(null);
-}
-
-/* ===================================================
-   SAVE / LOAD DRAFT (localStorage fallback)
-   =================================================== */
-function saveDraftToStorage() {
-  try {
-    localStorage.setItem('tatu_draft', JSON.stringify({
-      step: state.currentStep,
-      draft: state.draft,
-    }));
-  } catch (e) {
-    // Storage full or unavailable
-  }
-}
-
-function loadDraftFromStorage() {
-  try {
-    const saved = localStorage.getItem('tatu_draft');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      state.currentStep = parsed.step || 1;
-      Object.assign(state.draft, parsed.draft || {});
-      return true;
-    }
-  } catch (e) {
-    // Invalid data
-  }
-  return false;
-}
-
-function clearDraftFromStorage() {
-  try {
-    localStorage.removeItem('tatu_draft');
-  } catch (e) { /* ignore */ }
+  document.getElementById('success-request-id').textContent = `Заявка #${res.data.id} отправлена!`;
+  showScreen('screen-success');
+  state.draft = null;
 }
 
 /* ===================================================
    MY REQUESTS
    =================================================== */
+
 async function openMyRequests() {
   haptic('light');
-  showScreen('my-requests');
-  updateBottomNav('screen-my-requests');
+  showScreen('screen-my-requests');
 
-  document.getElementById('requests-loading').classList.remove('hidden');
-  document.getElementById('requests-empty').classList.add('hidden');
-  document.getElementById('requests-list').innerHTML = '';
+  const loading = document.getElementById('requests-loading');
+  const empty = document.getElementById('requests-empty');
+  const list = document.getElementById('requests-list');
 
-  const userId = gettgId();
-  if (!userId) {
-    showEmptyRequests();
+  loading.classList.remove('hidden');
+  empty.classList.add('hidden');
+  list.innerHTML = '';
+
+  const res = await apiGet('requests');
+  loading.classList.add('hidden');
+
+  if (!res.ok) {
+    toast(res.error || 'Не удалось загрузить заявки');
     return;
   }
 
-  const requests = await apiGet(`requests?user_id=${userId}`);
-  state.requests = requests || [];
+  state.requests = Array.isArray(res.data) ? res.data : [];
 
-  document.getElementById('requests-loading').classList.add('hidden');
-
-  if (!state.requests || state.requests.length === 0) {
-    showEmptyRequests();
+  if (state.requests.length === 0) {
+    empty.classList.remove('hidden');
     return;
   }
 
   renderRequestsList();
-}
-
-function showEmptyRequests() {
-  document.getElementById('requests-empty').classList.remove('hidden');
 }
 
 function renderRequestsList() {
@@ -935,25 +765,26 @@ function renderRequestsList() {
 
   state.requests.forEach((req, index) => {
     const status = STATUS_MAP[req.status] || STATUS_MAP.new;
+
     const card = document.createElement('div');
     card.className = 'request-card';
     card.style.animationDelay = `${index * 50}ms`;
 
+    // Внутренний HTML только с экранированием — описание вводит пользователь
     card.innerHTML = `
       <div class="request-card-header">
         <span class="request-id">📋 Заявка #${req.id}</span>
         <span class="status-badge ${status.cssClass}">${status.icon} ${status.text}</span>
       </div>
       <div class="request-card-body">
-        <div class="meta-item">💬 ${req.description?.substring(0, 60) || 'Нет описания'}...</div>
-        <div class="meta-item">📍 ${req.location || '—'}</div>
-        ${req.size ? `<div class="meta-item">📏 ${req.size}</div>` : ''}
+        <div class="meta-item">💬 ${escapeHtml((req.description || 'Нет описания').slice(0, 60))}…</div>
+        <div class="meta-item">📍 ${escapeHtml(req.location || '—')}</div>
       </div>
       <div class="request-card-actions">
-        <button class="btn btn-secondary" onclick="App.openRequestDetail(${req.id})">👁 Открыть</button>
-      </div>
-    `;
+        <button class="btn btn-secondary open-detail" data-id="${req.id}">👁 Открыть</button>
+      </div>`;
 
+    card.querySelector('.open-detail').addEventListener('click', () => openRequestDetail(req.id));
     container.appendChild(card);
   });
 }
@@ -961,16 +792,14 @@ function renderRequestsList() {
 async function openRequestDetail(requestId) {
   haptic('light');
 
-  let req;
-  if (state.requests.find(r => r.id === requestId)) {
-    req = state.requests.find(r => r.id === requestId);
-  } else {
-    req = await apiGet(`requests/${requestId}`);
-  }
-
+  let req = state.requests.find((r) => r.id === requestId);
   if (!req) {
-    showToast('Заявка не найдена');
-    return;
+    const res = await apiGet(`requests/${requestId}`);
+    if (!res.ok) {
+      toast(res.error || 'Заявка не найдена');
+      return;
+    }
+    req = res.data;
   }
 
   const status = STATUS_MAP[req.status] || STATUS_MAP.new;
@@ -985,279 +814,427 @@ async function openRequestDetail(requestId) {
   document.getElementById('detail-urgency').textContent = req.is_urgent ? '⚡ Да' : 'Нет';
   document.getElementById('detail-description').textContent = req.description || '—';
 
-  // References
-  const refContainer = document.getElementById('detail-references');
-  if (req.references?.length > 0) {
-    refContainer.innerHTML = req.references
-      .map(r => `<img src="${r.thumbnail_url || r.data_url || ''}" alt="Референс">`)
-      .join('');
-    document.getElementById('detail-ref-section').classList.remove('hidden');
+  // Дата сеанса (появляется только когда назначена)
+  const dateRow = document.getElementById('detail-date-row');
+  const appt = req.appointment;
+  if (appt && appt.slot_date) {
+    document.getElementById('detail-date').textContent = formatDateRu(appt.slot_date);
+    dateRow.style.display = '';
   } else {
-    document.getElementById('detail-ref-section').classList.add('hidden');
+    dateRow.style.display = 'none';
   }
 
-  // Brief
-  if (req.brief_answers) {
-    const briefSection = document.getElementById('detail-brief-section');
-    const briefContainer = document.getElementById('detail-brief');
+  // Анкета
+  const briefSection = document.getElementById('detail-brief-section');
+  const brief = req.brief_answers || {};
+  const entries = Object.entries(brief).filter(([, v]) => v);
+
+  if (entries.length === 0) {
+    briefSection.classList.add('hidden');
+  } else {
     briefSection.classList.remove('hidden');
-
-    briefContainer.innerHTML = Object.entries(req.brief_answers).map(([key, val]) => {
-      let displayVal = val;
-      if (key === 'experience_level') {
-        displayVal = { none: 'Нет, первая', few: 'Была 1–2', many: 'Было 3+' }[val] || val;
-      } else if (key === 'preferred_style') {
-        displayVal = {
-          realism: 'Реализм', graphics: 'Графика', watercolor: 'Акварель',
-          geometry: 'Геометрия', other: val
-        }[val] || val;
-      } else if (key === 'color_mode') {
-        displayVal = COLOR_LABELS[val] || val;
-      } else if (key === 'inspiration_source') {
-        displayVal = { pinterest: 'Pinterest', instagram: 'Instagram', own: 'Свои референсы', dontknow: 'Не знаю' }[val] || val;
-      } else if (key === 'importance') {
-        displayVal = { aesthetics: 'Эстетика', meaning: 'Смысл', safety: 'Безопасность' }[val] || val;
-      }
-      return `<div class="detail-brief-item">
-        <span class="label">${BRIEF_LABELS[key] || key}</span>
-        <span class="value">${displayVal}</span>
-      </div>`;
-    }).join('');
-  } else {
-    document.getElementById('detail-brief-section').classList.add('hidden');
+    document.getElementById('detail-brief').innerHTML = entries
+      .map(([key, value]) => {
+        let display = value;
+        if (key === 'preferred_style' && !BRIEF_VALUES.preferred_style[value]) display = value;
+        else if (BRIEF_VALUES[key]) display = BRIEF_VALUES[key][value] || value;
+        return `<div class="detail-brief-item">
+          <span class="label">${escapeHtml(BRIEF_LABELS[key] || key)}</span>
+          <span class="value">${escapeHtml(String(display))}</span>
+        </div>`;
+      })
+      .join('');
   }
 
-  // Rejection reason
+  // Причина отклонения
+  const rejSection = document.getElementById('detail-rejection-section');
   if (req.rejection_reason) {
     document.getElementById('detail-reason').textContent = req.rejection_reason;
-    document.getElementById('detail-rejection-section').classList.remove('hidden');
+    rejSection.classList.remove('hidden');
   } else {
-    document.getElementById('detail-rejection-section').classList.add('hidden');
+    rejSection.classList.add('hidden');
   }
 
   openModal('modal-request-detail');
 }
 
 /* ===================================================
-   LAST REQUEST (from home)
-   =================================================== */
-function openLastRequest() {
-  haptic('light');
-  const card = document.getElementById('home-last-request');
-  const infoEl = document.getElementById('last-request-info');
-  const text = infoEl.textContent;
-  const match = text.match(/#(\d+)/);
-  if (match) {
-    openRequestDetail(parseInt(match[1]));
-  }
-}
-
-/* ===================================================
    CALENDAR
    =================================================== */
-async function openCalendar() {
+
+function openCalendar() {
   haptic('light');
-  showScreen('calendar');
-  updateBottomNav('screen-calendar');
+  showScreen('screen-calendar');
   renderCalendar();
-  await loadCalendarSlots();
+  loadCalendarSlots();
 }
 
 function prevMonth() {
   haptic('light');
-  state.calendarMonth--;
+  state.calendarMonth -= 1;
   if (state.calendarMonth < 0) {
     state.calendarMonth = 11;
-    state.calendarYear--;
+    state.calendarYear -= 1;
   }
   renderCalendar();
+  loadCalendarSlots();
 }
 
 function nextMonth() {
   haptic('light');
-  state.calendarMonth++;
+  state.calendarMonth += 1;
   if (state.calendarMonth > 11) {
     state.calendarMonth = 0;
-    state.calendarYear++;
+    state.calendarYear += 1;
   }
   renderCalendar();
+  loadCalendarSlots();
+}
+
+function isoDate(y, m, d) {
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
 function renderCalendar() {
   const year = state.calendarYear;
   const month = state.calendarMonth;
 
-  const monthNames = [
+  const months = [
     'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
   ];
 
-  document.getElementById('calendar-month-year').textContent = `${monthNames[month]} ${year}`;
+  document.getElementById('calendar-month-year').textContent = `${months[month]} ${year}`;
 
   const grid = document.getElementById('calendar-grid');
   grid.innerHTML = '';
 
   const firstDay = new Date(year, month, 1);
-  // JS: Sunday=0, Monday=1... We want Monday=0
   let startDay = firstDay.getDay() - 1;
   if (startDay < 0) startDay = 6;
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const today = new Date();
-  const todayStr = formatDate(today);
+  const todayStr = isoDate(today.getFullYear(), today.getMonth(), today.getDate());
 
-  // Empty cells before first day
   for (let i = 0; i < startDay; i++) {
     const cell = document.createElement('div');
     cell.className = 'calendar-day empty';
     grid.appendChild(cell);
   }
 
-  // Day cells
   for (let day = 1; day <= daysInMonth; day++) {
     const cell = document.createElement('div');
     cell.className = 'calendar-day';
     cell.textContent = day;
 
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-    if (dateStr === todayStr) {
-      cell.classList.add('today');
-    }
+    const dateStr = isoDate(year, month, day);
+    if (dateStr === todayStr) cell.classList.add('today');
 
     const slot = state.calendarSlots[dateStr];
-    if (slot) {
-      if (slot.is_blocked) {
-        cell.classList.add('busy');
-      } else {
-        cell.classList.add('free');
-      }
-    } else {
-      // No slot data — default to free
+    if (slot && (slot.is_blocked || slot.is_booked)) {
+      cell.classList.add('busy');
+    } else if (slot) {
       cell.classList.add('free');
     }
 
-    cell.addEventListener('click', () => {
-      haptic('light');
-      // Could open a detail view for the date
-    });
+    // Мастер может открыть/закрыть день прямо в календаре.
+    cell.dataset.date = dateStr;
+    if (state.me?.is_admin) {
+      cell.classList.add('clickable');
+      cell.addEventListener('click', () => toggleCalendarDay(dateStr));
+    } else {
+      cell.addEventListener('click', () => explainCalendarDay(dateStr));
+    }
 
     grid.appendChild(cell);
   }
 
-  // Hide/show empty state
+  // Подсказка видна только мастеру
+  const hint = document.getElementById('calendar-master-hint');
+  if (hint) hint.classList.toggle('hidden', !state.me?.is_admin);
+
   const hasSlots = Object.keys(state.calendarSlots).length > 0;
   document.getElementById('calendar-empty').classList.toggle('hidden', hasSlots);
 }
 
-async function loadCalendarSlots() {
-  const from = formatDate(new Date(state.calendarYear, state.calendarMonth, 1));
-  const to = formatDate(new Date(state.calendarYear, state.calendarMonth + 1, 0));
+async function toggleCalendarDay(dateStr) {
+  const slot = state.calendarSlots[dateStr];
 
-  const slots = await apiGet(`slots?from=${from}&to=${to}`);
-  if (slots) {
-    state.calendarSlots = {};
-    slots.forEach(slot => {
-      state.calendarSlots[slot.slot_date] = slot;
-    });
-  } else {
-    // Fallback: mock data if API is down
-    generateMockSlots();
+  // Занятый день трогать нельзя: там реальная запись клиента.
+  if (slot?.is_booked) {
+    tgAlert('На этот день уже есть запись — сначала отмени её в заявке.');
+    return;
   }
+
+  haptic('medium');
+
+  const res = await apiPost(`slots/${dateStr}/toggle`, {});
+  if (!res.ok) {
+    tgAlert(res.error || 'Не удалось изменить день');
+    return;
+  }
+
+  toast(res.data?.is_blocked ? 'День закрыт 🔒' : 'День открыт 🔓');
+  await loadCalendarSlots();
 }
 
-function generateMockSlots() {
-  // Generate some mock busy dates for demo
-  const year = state.calendarYear;
-  const month = state.calendarMonth;
-  const today = new Date();
+/** Клиент нажал на день: честно объясняем, как записаться. */
+function explainCalendarDay(dateStr) {
+  const slot = state.calendarSlots[dateStr];
 
-  // Block some dates randomly for demo
-  const busyDays = [3, 7, 10, 14, 18, 22, 25, 28];
+  if (slot?.is_booked) {
+    haptic('light');
+    toast('Этот день уже занят. Выбери другой ✨');
+    return;
+  }
 
-  busyDays.forEach(day => {
-    if (day <= new Date(year, month + 1, 0).getDate()) {
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      state.calendarSlots[dateStr] = {
-        slot_date: dateStr,
-        is_blocked: true,
-      };
-    }
-  });
+  if (slot?.is_blocked) {
+    haptic('light');
+    toast('Мастер закрыл этот день. Выбери другой ✨');
+    return;
+  }
+
+  haptic('light');
+  // Свободный день: запись идёт через заявку, а не по клику.
+  toast('Чтобы записаться — оставь заявку, мастер предложит время 💬');
+}
+
+async function loadCalendarSlots() {
+  const from = isoDate(state.calendarYear, state.calendarMonth, 1);
+  const lastDay = new Date(state.calendarYear, state.calendarMonth + 1, 0).getDate();
+  const to = isoDate(state.calendarYear, state.calendarMonth, lastDay);
+
+  const res = await apiGet(`slots/availability?start_date=${from}&end_date=${to}`);
+
+  state.calendarSlots = {};
+  if (res.ok && res.data && Array.isArray(res.data.days)) {
+    res.data.days.forEach((d) => {
+      state.calendarSlots[d.date] = d;
+    });
+  }
+  renderCalendar();
 }
 
 /* ===================================================
-   MASTER CONTACT
+   MASTER CABINET
    =================================================== */
+
+async function openMasterCabinet() {
+  haptic('light');
+
+  if (!state.me?.is_admin) {
+    tgAlert('Кабинет доступен только мастеру.');
+    return;
+  }
+
+  showScreen('screen-master');
+
+  const loading = document.getElementById('master-loading');
+  const empty = document.getElementById('master-empty');
+  const list = document.getElementById('master-list');
+  const stats = document.getElementById('master-stats');
+
+  loading.classList.remove('hidden');
+  empty.classList.add('hidden');
+  list.innerHTML = '';
+  stats.innerHTML = '';
+
+  const [dash, reqs] = await Promise.all([
+    apiGet('admin/dashboard'),
+    apiGet('requests?limit=50'),
+  ]);
+
+  loading.classList.add('hidden');
+
+  if (dash.ok && dash.data) {
+    const d = dash.data;
+    stats.innerHTML = `
+      <h3>Сводка</h3>
+      <div class="detail-item"><span class="detail-label">⏳ Новые</span><span class="detail-value">${d.new_count}</span></div>
+      <div class="detail-item"><span class="detail-label">✅ Приняты</span><span class="detail-value">${d.accepted_count}</span></div>
+      <div class="detail-item"><span class="detail-label">🖌 В работе</span><span class="detail-value">${d.in_progress_count}</span></div>
+      <div class="detail-item"><span class="detail-label">📅 Записаны</span><span class="detail-value">${d.scheduled_count}</span></div>
+      <div class="detail-item"><span class="detail-label">✨ Завершены</span><span class="detail-value">${d.completed_count}</span></div>`;
+  }
+
+  if (!reqs.ok) {
+    toast(reqs.error || 'Не удалось загрузить заявки');
+    return;
+  }
+
+  state.masterRequests = Array.isArray(reqs.data) ? reqs.data : [];
+
+  if (state.masterRequests.length === 0) {
+    empty.classList.remove('hidden');
+    return;
+  }
+
+  renderMasterList();
+}
+
+/** Строка «кто клиент» для карточки мастера. */
+function masterClientLine(req) {
+  const name = req.client_name || 'Клиент';
+  const username = req.client_username ? ` · @${req.client_username}` : '';
+  return `👤 ${name}${username}`;
+}
+
+function renderMasterList() {
+  const container = document.getElementById('master-list');
+  container.innerHTML = '';
+
+  state.masterRequests.forEach((req, index) => {
+    const status = STATUS_MAP[req.status] || STATUS_MAP.new;
+
+    const card = document.createElement('div');
+    card.className = 'request-card';
+    card.style.animationDelay = `${index * 40}ms`;
+
+    card.innerHTML = `
+      <div class="request-card-header">
+        <span class="request-id">#${req.id} · ${escapeHtml(req.location || '')}</span>
+        <span class="status-badge ${status.cssClass}">${status.icon} ${status.text}</span>
+      </div>
+      <div class="request-card-body">
+        <div class="meta-item">${escapeHtml(masterClientLine(req))}</div>
+        <div class="meta-item">💬 ${escapeHtml((req.description || '').slice(0, 80))}…</div>
+      </div>
+      <div class="request-card-actions" id="actions-${req.id}"></div>`;
+
+    const actions = card.querySelector(`#actions-${req.id}`);
+    buildMasterActions(req, actions);
+
+    container.appendChild(card);
+  });
+}
+
+function buildMasterActions(req, container) {
+  const btn = (label, cls, fn) => {
+    const b = document.createElement('button');
+    b.className = `btn ${cls}`;
+    b.textContent = label;
+    b.addEventListener('click', fn);
+    container.appendChild(b);
+  };
+
+  const act = async (endpoint, body, confirmText) => {
+    if (confirmText && !confirm(confirmText)) return;
+    haptic('medium');
+    const res = await apiPost(endpoint, body);
+    if (!res.ok) {
+      tgAlert(res.error || 'Не получилось');
+      return;
+    }
+    toast('Готово ✨');
+    openMasterCabinet();
+  };
+
+  if (req.status === 'new') {
+    btn('✅ Принять', 'btn-accent', () =>
+      act(`requests/${req.id}/accept`, {}, 'Принять эту заявку?'));
+    btn('❌ Отклонить', 'btn-secondary', () =>
+      act(`requests/${req.id}/reject`, { reason: null }, 'Отклонить заявку?'));
+  } else if (req.status === 'accepted') {
+    btn('🖌 В работу', 'btn-accent', () =>
+      act(`requests/${req.id}/proceed`, {}, 'Взять в работу?'));
+    btn('❌ Отклонить', 'btn-secondary', () =>
+      act(`requests/${req.id}/reject`, { reason: null }, 'Отклонить заявку?'));
+  } else if (req.status === 'in_progress') {
+    btn('📅 Назначить дату', 'btn-accent', () => promptSchedule(req.id));
+  } else if (req.status === 'scheduled') {
+    btn('✨ Завершить', 'btn-accent', () =>
+      act(`requests/${req.id}/complete`, {}, 'Сеанс проведён?'));
+    btn('🚫 Отменить', 'btn-secondary', () =>
+      act(`requests/${req.id}/cancel`, {}, 'Отменить запись?'));
+  } else if (req.status === 'rejected') {
+    btn('↩️ Вернуть', 'btn-secondary', () =>
+      act(`requests/${req.id}/reactivate`, {}, 'Вернуть заявку в очередь?'));
+  }
+
+  btn('👁 Открыть', 'btn-secondary', () => openRequestDetail(req.id));
+}
+
+async function promptSchedule(requestId) {
+  const input = prompt('Дата сеанса в формате ГГГГ-ММ-ДД (например 2026-12-05):');
+  if (!input) return;
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.trim())) {
+    tgAlert('Неверный формат. Нужно так: 2026-12-05');
+    return;
+  }
+
+  haptic('medium');
+  const res = await apiPost(`requests/${requestId}/schedule`, { slot_date: input.trim() });
+
+  if (!res.ok) {
+    tgAlert(res.error || 'Не получилось назначить дату');
+    return;
+  }
+
+  toast('Дата назначена 📅');
+  openMasterCabinet();
+}
+
+/* ===================================================
+   MODALS / CONTACT
+   =================================================== */
+
+function openModal(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
 function openMasterContact() {
   haptic('light');
-  // Open master's Telegram profile
-  if (tg) {
-    tg.openTelegramLink('https://t.me/aritu_tattoo'); // Replace with actual username
+  if (tg?.openTelegramLink) {
+    tg.openTelegramLink(MASTER_TELEGRAM);
   } else {
-    window.open('https://t.me/aritu_tattoo', '_blank');
+    window.open(MASTER_TELEGRAM, '_blank');
   }
 }
 
 /* ===================================================
-   CLOSE REQUEST FORM
+   UTILS
    =================================================== */
-function cancelRequestForm() {
-  haptic('light');
-  if (state.currentStep === 1 || confirm('Отменить создание заявки?')) {
-    clearDraftFromStorage();
-    initHome();
-  }
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-/* ===================================================
-   MODALS
-   =================================================== */
-function openModal(modalId) {
-  const modal = document.getElementById(modalId);
-  if (modal) {
-    modal.classList.remove('hidden');
-    document.body.style.overflow = 'hidden';
-  }
+function formatDateRu(iso) {
+  // 'YYYY-MM-DD' -> 'DD.MM.YYYY'
+  if (!iso) return '';
+  const parts = String(iso).slice(0, 10).split('-');
+  if (parts.length !== 3) return iso;
+  return `${parts[2]}.${parts[1]}.${parts[0]}`;
 }
 
-function closeModal(modalId) {
-  const modal = document.getElementById(modalId);
-  if (modal) {
-    modal.classList.add('hidden');
-    document.body.style.overflow = '';
-  }
-}
-
-/* ===================================================
-   BOTTOM NAV
-   =================================================== */
-function updateBottomNav(activeScreen) {
-  const nav = document.getElementById('bottom-nav');
-  if (!nav) return;
-
-  nav.querySelectorAll('.nav-item').forEach(item => {
-    item.classList.toggle('active', item.dataset.screen === activeScreen);
-  });
-}
-
-function goHome() {
-  haptic('light');
-  initHome();
-}
-
-/* ===================================================
-   CONFETTI
-   =================================================== */
 function launchConfetti() {
   const canvas = document.getElementById('confetti-canvas');
+  if (!canvas) return;
+
   canvas.classList.remove('hidden');
-  const ctx = canvas.getContext('2d');
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  const particles = [];
+  const ctx = canvas.getContext('2d');
   const colors = ['#D4A24E', '#F5E6C8', '#4CAF50', '#E53935', '#FF9800', '#2196F3', '#FFFFFF'];
+  const particles = [];
 
   for (let i = 0; i < 80; i++) {
     particles.push({
@@ -1266,184 +1243,79 @@ function launchConfetti() {
       w: 4 + Math.random() * 6,
       h: 4 + Math.random() * 6,
       color: colors[Math.floor(Math.random() * colors.length)],
-      vx: (Math.random() - 0.5) * 4,
-      vy: 2 + Math.random() * 4,
-      rotation: Math.random() * 360,
-      rotationSpeed: (Math.random() - 0.5) * 10,
-      opacity: 1,
+      vy: 2 + Math.random() * 3,
+      vx: -1.5 + Math.random() * 3,
+      rot: Math.random() * Math.PI,
+      vr: -0.1 + Math.random() * 0.2,
     });
   }
 
-  let frame = 0;
-  const maxFrames = 120;
+  const start = performance.now();
 
-  function animate() {
-    if (frame > maxFrames) {
-      canvas.classList.add('hidden');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      return;
-    }
-
+  function frame(now) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    particles.forEach(p => {
+    particles.forEach((p) => {
       p.x += p.vx;
       p.y += p.vy;
-      p.vy += 0.1; // gravity
-      p.rotation += p.rotationSpeed;
-
-      if (frame > maxFrames - 30) {
-        p.opacity -= 0.03;
-      }
+      p.rot += p.vr;
 
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate((p.rotation * Math.PI) / 180);
-      ctx.globalAlpha = Math.max(0, p.opacity);
+      ctx.rotate(p.rot);
       ctx.fillStyle = p.color;
       ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
       ctx.restore();
     });
 
-    frame++;
-    requestAnimationFrame(animate);
+    if (now - start < 3500) {
+      requestAnimationFrame(frame);
+    } else {
+      canvas.classList.add('hidden');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
   }
 
-  animate();
+  requestAnimationFrame(frame);
 }
 
 /* ===================================================
-   TOAST NOTIFICATIONS
+   PUBLIC API — вызывается из onclick в index.html
    =================================================== */
-function showToast(message, duration = 3000) {
-  // Remove existing toast
-  const existing = document.querySelector('.toast');
-  if (existing) existing.remove();
 
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = message;
-  toast.style.cssText = `
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--primary);
-    color: #fff;
-    padding: 12px 24px;
-    border-radius: 8px;
-    font-size: 13px;
-    z-index: 300;
-    animation: slideUp 0.3s ease-out;
-    max-width: 90vw;
-    text-align: center;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  `;
-  document.body.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.animation = 'fadeOut 0.3s ease-in';
-    setTimeout(() => toast.remove(), 300);
-  }, duration);
-}
-
-/* ===================================================
-   RIPPLE EFFECT ON BUTTONS
-   =================================================== */
-function initRipple() {
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.btn, .menu-btn, .nav-item');
-    if (!btn) return;
-
-    const rect = btn.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    btn.style.setProperty('--ripple-x', `${(x / rect.width) * 100}%`);
-    btn.style.setProperty('--ripple-y', `${(y / rect.height) * 100}%`);
-
-    btn.classList.add('ripple');
-    setTimeout(() => btn.classList.remove('ripple'), 600);
-  });
-}
-
-/* ===================================================
-   TEXTAREA COUNTER
-   =================================================== */
-function initTextareaCounter() {
-  const textarea = document.getElementById('field-description');
-  const counter = document.getElementById('desc-count');
-
-  if (textarea && counter) {
-    textarea.addEventListener('input', () => {
-      counter.textContent = textarea.value.length;
-    });
-  }
-}
-
-/* ===================================================
-   INITIALIZATION
-   =================================================== */
-async function init() {
-  // Show loading
-  showScreen('loading');
-
-  // Initialize Telegram
-  initTelegram();
-
-  // Initialize UI helpers
-  initReferences();
-  initQuickButtons();
-  initTextareaCounter();
-  initRipple();
-
-  // Load saved draft if exists
-  const hasDraft = loadDraftFromStorage();
-
-  // Show home
-  await initHome();
-
-  // If there's a draft in progress, offer to continue
-  if (hasDraft && state.currentStep > 1) {
-    // Optional: show a banner "Продолжить черновик?"
-    // For now, we just keep the draft in localStorage
-  }
-}
-
-/* ===================================================
-   GLOBAL EXPORT
-   =================================================== */
-window.App = {
-  // Navigation
+const App = {
   goHome,
+  retryInit,
   startNewRequest,
-  openMyRequests,
-  openCalendar,
-  openMasterContact,
+  navNewRequest,
+  hasDraftContent,
   cancelRequestForm,
-
-  // Request form
   nextStep,
   prevStep,
   showEditOptions,
   submitRequest,
-
-  // Requests
-  openLastRequest,
+  openMyRequests,
   openRequestDetail,
-
-  // Calendar
+  openCalendar,
   prevMonth,
   nextMonth,
-
-  // Modals
+  toggleCalendarDay,
+  explainCalendarDay,
+  applyUrgentPrice,
+  openMasterCabinet,
+  openLastRequest,
+  openMasterContact,
   openModal,
   closeModal,
 };
 
-// Start app when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
+window.App = App;
+
+/* ===================================================
+   BOOT
+   =================================================== */
+
+document.addEventListener('DOMContentLoaded', () => {
+  initFormControls();
   init();
-}
+});

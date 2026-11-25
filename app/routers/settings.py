@@ -25,6 +25,7 @@ async def get_settings(
         settings = BotSettings()
         session.add(settings)
         await session.commit()
+        await session.refresh(settings)
     return settings
 
 
@@ -47,4 +48,7 @@ async def update_settings(
         setattr(settings, field, value)
 
     await session.commit()
+    # После commit объект «просрочен»: обращение к updated_at вызвало бы
+    # ленивую подгрузку и упало бы с MissingGreenlet. Перечитываем явно.
+    await session.refresh(settings)
     return settings

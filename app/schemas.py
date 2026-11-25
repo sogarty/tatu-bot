@@ -129,6 +129,7 @@ class AppointmentOut(BaseModel):
     id: int
     request_id: int
     slot_id: int
+    slot_date: date | None = None
     status: str
     master_note: str | None = None
     created_at: datetime
@@ -153,8 +154,19 @@ class TattooRequestBase(BaseModel):
 
 
 class TattooRequestCreate(TattooRequestBase):
+    """Данные заявки от клиента.
+
+    user_id и created_by сюда НЕ входят: личность берётся из подписанного
+    Telegram initData на сервере. Иначе любой мог бы отправить заявку
+    от чужого имени, подставив чужой id.
+    """
+
+
+class TattooRequestAdminCreate(TattooRequestBase):
+    """Создание заявки мастером от имени клиента."""
+
     user_id: int
-    created_by: int
+    created_by: int | None = None
 
 
 class TattooRequestDraftUpdate(BaseModel):
@@ -182,6 +194,9 @@ class TattooRequestOut(BaseModel):
     urgent_surcharge: float | None = None
     status: str
     created_by: int
+    # Кто клиент: мастеру нужно видеть имя, а не только числовой id.
+    client_name: str | None = None
+    client_username: str | None = None
     brief_answers: dict | None = None
     queue_order: int | None = None
     queue_rank: int | None = None

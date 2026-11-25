@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import date, datetime
 from typing import TYPE_CHECKING
@@ -15,7 +15,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
+    true,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TEXT
 from sqlalchemy.orm import (
@@ -72,8 +74,8 @@ class TgUser(Base):
     username: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    is_regular: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
+    is_regular: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), nullable=False
@@ -129,7 +131,7 @@ class TattooRequest(Base):
     color_mode: Mapped[str] = mapped_column(
         String(10), nullable=False
     )  # 'bw' | 'color'
-    is_urgent: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
+    is_urgent: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     urgent_surcharge: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="draft")
     created_by: Mapped[int] = mapped_column(
@@ -151,7 +153,7 @@ class TattooRequest(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-    is_archived: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
+    is_archived: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
 
     # Relationships
     user: Mapped["TgUser"] = relationship(
@@ -174,6 +176,22 @@ class TattooRequest(Base):
 
     def __repr__(self) -> str:
         return f"<TattooRequest id={self.id} status={self.status}>"
+
+    @property
+    def client_name(self) -> str | None:
+        """Имя клиента для мастера. Требует загруженной связи user."""
+        if self.user is None:
+            return None
+        parts = [self.user.first_name, self.user.last_name]
+        name = " ".join(p for p in parts if p)
+        return name or None
+
+    @property
+    def client_username(self) -> str | None:
+        """@username клиента, если он его указал."""
+        if self.user is None:
+            return None
+        return self.user.username or None
 
 
 # ─── request_reference ───────────────────────────────────────────────────────
@@ -248,7 +266,7 @@ class MasterSlot(Base):
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     slot_date: Mapped[date] = mapped_column(Date, unique=True, nullable=False)
-    is_blocked: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
+    is_blocked: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     master_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -300,6 +318,11 @@ class Appointment(Base):
     # Relationships
     request: Mapped["TattooRequest"] = relationship(back_populates="appointment")
     slot: Mapped["MasterSlot"] = relationship(back_populates="appointments")
+
+    @property
+    def slot_date(self) -> "date | None":
+        """Дата сеанса — удобно отдавать клиенту прямо в заявке."""
+        return self.slot.slot_date if self.slot is not None else None
 
     def __repr__(self) -> str:
         return f"<Appointment id={self.id} slot={self.slot_id} status={self.status}>"

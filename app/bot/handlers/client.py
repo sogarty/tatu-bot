@@ -30,9 +30,28 @@ from app.models import TgUser
 logger = logging.getLogger(__name__)
 
 
+def _app_url() -> str:
+    """Адрес Mini App.
+
+    Приоритет — WEBAPP_URL из настроек. Если он не задан, собираем адрес
+    от WEBHOOK_BASE_URL: так кнопка не исчезнет из-за забытой переменной.
+    """
+    settings = get_settings()
+
+    url = (settings.webapp_url or "").strip()
+    if url:
+        return url.rstrip("/") + "/"
+
+    base = (settings.webhook_base_url or "").strip()
+    if base:
+        return base.rstrip("/") + "/app/"
+
+    return ""
+
+
 def _app_keyboard() -> InlineKeyboardMarkup | None:
-    """Кнопка открытия Mini App. None — если адрес приложения не задан."""
-    url = (get_settings().webapp_url or "").strip()
+    """Кнопка открытия Mini App. None — если адрес определить не удалось."""
+    url = _app_url()
     if not url:
         return None
     return InlineKeyboardMarkup(
