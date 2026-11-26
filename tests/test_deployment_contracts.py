@@ -45,7 +45,7 @@ def test_alembic_head_applies_idempotency_schema(tmp_path):
 
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "007",
+            "008",
         )
         columns = {
             row[1] for row in connection.execute("PRAGMA table_info(tattoo_request)")
@@ -61,6 +61,16 @@ def test_alembic_head_applies_idempotency_schema(tmp_path):
         assert {"image_data", "image_content_type", "has_uploaded_image"} <= (
             reference_columns
         )
+        captions = dict(
+            connection.execute(
+                "SELECT image_url, title FROM portfolio_item WHERE image_url IN (?, ?)",
+                ("assets/portfolio/k12.jpg", "assets/portfolio/k14.jpg"),
+            )
+        )
+        assert captions == {
+            "assets/portfolio/k12.jpg": "Крылья и хризантема",
+            "assets/portfolio/k14.jpg": "Пятнистая кошка",
+        }
 
 
 def test_health_requires_webhook_readiness(monkeypatch):
