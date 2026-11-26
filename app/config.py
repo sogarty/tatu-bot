@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Для PostgreSQL: postgresql+asyncpg://user:pass@host:5432/dbname
     # Для SQLite (по умолчанию): оставь пустым
     database_url: str = ""
+    # Только для локальных smoke-тестов. В production SQLite эфемерна на Render
+    # и не должна запускаться незаметно.
+    allow_ephemeral_database: bool = False
 
     # Redis (optional fallback)
     redis_url: str | None = None
@@ -46,7 +49,21 @@ class Settings(BaseSettings):
     @property
     def db_url_sync(self) -> str:
         """Return sync URL for Alembic."""
-        return self.database_url.replace("+asyncpg", "")
+        return self.async_database_url.replace("+asyncpg", "").replace("+aiosqlite", "")
+
+    @property
+    def async_database_url(self) -> str:
+        """Return a SQLAlchemy async URL for the configured database."""
+        url = self.database_url.strip()
+        if not url:
+            return ""
+        if url.startswith("postgresql+asyncpg://"):
+            return url
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://"):]
+        if url.startswith("postgresql://"):
+            url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+        return url
 
     @property
     def allowed_origins_list(self) -> list[str]:

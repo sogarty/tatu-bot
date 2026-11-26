@@ -2,13 +2,13 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#F8F8FA">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#07070A">
   <title>Тату-мастер Ариадна</title>
   <!-- Обязательно: без этого скрипта Telegram не передаёт initData,
        и приложение не может авторизоваться на сервере. -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <!-- ===== ЭКРАНЫ ===== -->
@@ -34,10 +34,21 @@
   <!-- 1. ГЛАВНОЕ МЕНЮ -->
   <div id="screen-home" class="screen">
     <div class="home-content">
-      <div class="home-header">
-        <h1 id="greeting-text"></h1>
-        <p id="home-subtitle" class="text-muted"></p>
+      <header class="noir-topbar"><span>TATTOO KELL <i>◆</i> <small>с 2020</small></span><span>ЭЛЕКТРОСТАЛЬ</span></header>
+      <div class="home-hero">
+        <p class="noir-eyebrow">МАСТЕР · АРИАДНА</p>
+        <h1 class="noir-title">Татуировки,<br>рождённые<br><em>из тьмы</em></h1>
+        <p class="noir-lede" id="home-subtitle"></p>
+        <div class="hero-actions">
+          <button class="btn btn-accent" onclick="App.startNewRequest()">Оставить заявку</button>
+          <button class="btn btn-secondary" onclick="App.openPortfolio()">Работы</button>
+        </div>
       </div>
+
+      <button class="home-feature" onclick="App.openPortfolio()" aria-label="Открыть портфолио">
+        <img src="assets/portfolio/k01.jpg" alt="Пион, татуировка на бедре">
+        <span><b>Пион</b><small>БЕДРО · ЦВЕТ</small></span>
+      </button>
 
       <div id="home-last-request" class="last-request-card hidden">
         <div class="last-request-header">
@@ -49,23 +60,28 @@
       </div>
 
       <div class="home-menu">
-        <button class="menu-btn" onclick="App.startNewRequest()">
-          <span class="menu-btn-icon">✍️</span>
-          <span class="menu-btn-text">Хочу тату</span>
-        </button>
         <button class="menu-btn" onclick="App.openMyRequests()">
-          <span class="menu-btn-icon">📋</span>
+          <span class="menu-btn-icon" aria-hidden="true">◷</span>
           <span class="menu-btn-text">Мои заявки</span>
         </button>
         <button class="menu-btn" onclick="App.openCalendar()">
-          <span class="menu-btn-icon">📅</span>
+          <span class="menu-btn-icon" aria-hidden="true">▦</span>
           <span class="menu-btn-text">Календарь</span>
         </button>
         <button class="menu-btn" onclick="App.openMasterContact()">
-          <span class="menu-btn-icon">💬</span>
+          <span class="menu-btn-icon" aria-hidden="true">↗</span>
           <span class="menu-btn-text">Написать мастеру</span>
         </button>
       </div>
+
+      <section class="home-portfolio">
+        <div class="home-section-heading"><h2>РАБОТЫ</h2><button onclick="App.openPortfolio()">Все работы <span>→</span></button></div>
+        <div class="home-work-strip">
+          <button onclick="App.openPortfolio()"><img src="assets/portfolio/k12.jpg" alt="Чёрный рукав"><span>Чёрный рукав</span></button>
+          <button onclick="App.openPortfolio()"><img src="assets/portfolio/k01.jpg" alt="Пион"><span>Пион</span></button>
+          <button onclick="App.openPortfolio()"><img src="assets/portfolio/k09.jpg" alt="Стебли"><span>Стебли</span></button>
+        </div>
+      </section>
 
       <div class="home-menu" id="home-master-block" style="display:none">
         <button class="menu-btn" onclick="App.openMasterCabinet()">
@@ -75,9 +91,24 @@
       </div>
 
       <div class="home-footer">
+        <button class="intro-replay" onclick="App.playIntro()">О знакомстве с Ариадной</button>
         <p class="text-muted">Тату-мастер Ариадна © 2026</p>
       </div>
     </div>
+  </div>
+
+  <div id="screen-portfolio" class="screen">
+    <header class="page-header portfolio-header"><button class="btn-icon" onclick="App.goHome()" aria-label="Назад">←</button><h2>Работы</h2><span>ПОРТФОЛИО</span></header>
+    <div class="portfolio-intro"><p class="noir-eyebrow">TATTOO KELL · АРИАДНА</p><h1>Работы</h1><p>Готовые татуировки на коже. Тонкая графика, цвет и тяжёлый чёрный.</p></div>
+    <div class="portfolio-filters" role="group" aria-label="Фильтр работ">
+      <button class="selected" data-filter="all" onclick="App.filterPortfolio('all', this)">Все</button>
+      <button data-filter="graphic" onclick="App.filterPortfolio('graphic', this)">Графика</button>
+      <button data-filter="color" onclick="App.filterPortfolio('color', this)">Цвет</button>
+      <button data-filter="black" onclick="App.filterPortfolio('black', this)">Чёрное</button>
+      <button data-filter="botanical" onclick="App.filterPortfolio('botanical', this)">Ботаника</button>
+    </div>
+    <div id="portfolio-grid" class="portfolio-grid"></div>
+    <div class="portfolio-contact"><button class="btn btn-accent full-width" onclick="App.startNewRequest()">Обсудить свою идею</button></div>
   </div>
 
   <!-- 2. СОЗДАНИЕ ЗАЯВКИ (7 шагов, без фото) -->
@@ -470,6 +501,22 @@
 
     <div id="master-stats" class="detail-section"></div>
 
+    <section class="master-portfolio detail-section">
+      <div class="section-heading"><h3>Портфолио</h3><button class="btn btn-accent" onclick="App.resetPortfolioForm(); document.getElementById('portfolio-form').classList.remove('hidden')">Добавить</button></div>
+      <form id="portfolio-form" class="portfolio-admin-form hidden" onsubmit="App.savePortfolioItem(event)">
+        <h4 id="portfolio-form-title">Добавить работу</h4>
+        <label>Название<input id="portfolio-title" required maxlength="120"></label>
+        <label>Место на теле<input id="portfolio-place" required maxlength="120"></label>
+        <label>Теги через запятую<input id="portfolio-tags" placeholder="graphic, botanical"></label>
+        <label>URL изображения<input id="portfolio-image-url" placeholder="assets/portfolio/example.jpg"></label>
+        <label>Загрузить файл<input id="portfolio-image" type="file" accept="image/jpeg,image/png,image/webp"></label>
+        <label>Порядок<input id="portfolio-sort" type="number" value="0"></label>
+        <label class="portfolio-check"><input id="portfolio-published" type="checkbox" checked> Опубликована</label>
+        <div class="portfolio-form-actions"><button type="submit" class="btn btn-accent">Сохранить</button><button type="button" class="btn btn-secondary" onclick="document.getElementById('portfolio-form').classList.add('hidden')">Отмена</button></div>
+      </form>
+      <div id="admin-portfolio-list" class="admin-portfolio-list"></div>
+    </section>
+
     <div id="master-loading" class="loading hidden">
       <div class="loading-spinner"></div>
     </div>
@@ -489,22 +536,33 @@
   <!-- Нижняя навигация -->
   <nav id="bottom-nav" class="bottom-nav hidden">
     <button class="nav-item active" data-screen="screen-home" onclick="App.goHome()">
-      <span class="nav-icon">🏠</span>
+      <span class="nav-icon" aria-hidden="true">⌂</span>
       <span class="nav-label">Главная</span>
     </button>
     <button class="nav-item" data-screen="screen-request-form" onclick="App.navNewRequest()">
-      <span class="nav-icon">✍️</span>
+      <span class="nav-icon" aria-hidden="true">＋</span>
       <span class="nav-label">Заявка</span>
     </button>
+    <button class="nav-item" data-screen="screen-portfolio" onclick="App.openPortfolio()">
+      <span class="nav-icon" aria-hidden="true">▧</span>
+      <span class="nav-label">Работы</span>
+    </button>
     <button class="nav-item" data-screen="screen-my-requests" onclick="App.openMyRequests()">
-      <span class="nav-icon">👤</span>
+      <span class="nav-icon" aria-hidden="true">◷</span>
       <span class="nav-label">Заявки</span>
     </button>
   </nav>
 
+  <div id="intro-overlay" class="intro-overlay" aria-hidden="true">
+    <div class="intro-word">KELL</div>
+    <div class="intro-images"><img class="intro-sketch" src="assets/portfolio/intro-sketch.jpg" alt=""><img class="intro-stencil" src="assets/portfolio/intro-stencil.jpg" alt=""><img class="intro-final" src="assets/portfolio/intro-final.jpg" alt=""></div>
+    <div class="intro-caption"><span>TATTOO KELL · АРИАДНА</span><b>Идея обретает форму.<br>Форма остаётся с тобой.</b></div>
+    <button class="intro-skip" onclick="App.closeIntro()">Пропустить →</button>
+  </div>
+
   <!-- Тосты -->
   <div id="toast" class="hidden" style="position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#2B2B33;color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;z-index:9999;max-width:88%;text-align:center;"></div>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

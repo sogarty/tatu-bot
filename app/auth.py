@@ -43,6 +43,7 @@ from app.models import Appointment, TattooRequest
 # Сколько живёт initData. Telegram обновляет его при каждом открытии
 # приложения, поэтому сутки — безопасный и достаточный срок.
 DEFAULT_TTL_SECONDS = 86400
+MAX_CLOCK_SKEW_SECONDS = 60
 
 
 # ─── Валидация Telegram WebApp initData ─────────────────────────────────────
@@ -132,7 +133,10 @@ def verify_telegram_webapp_init_data(
 
         if auth_date <= 0:
             return None
-        if time.time() - auth_date > ttl:
+        now = time.time()
+        if auth_date > now + MAX_CLOCK_SKEW_SECONDS:
+            return None
+        if now - auth_date > ttl:
             return None
 
         # Извлекаем user
@@ -252,7 +256,7 @@ async def load_request_for_user(
         return req
 
     # Обычный пользователь — только свои (404, чтобы не раскрывать чужие id)
-    if req.user_id == current_user["user_id"]:
+    if req.user_id == current_user["user_id"] and not req.is_archived:
         return req
 
     raise RequestNotFoundError()

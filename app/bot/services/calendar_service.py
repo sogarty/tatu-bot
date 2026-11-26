@@ -93,7 +93,6 @@ async def toggle_slot(
         return slot
 
     slot.is_blocked = not slot.is_blocked
-    slot.updated_at = datetime.utcnow()
     await session.flush()
     return slot
 
@@ -147,7 +146,7 @@ async def get_free_slots(
 
     if not slots:
         # Если слотов нет — все дни считаются свободными
-        return list(_generate_date_range(start_date, end_date))
+        return _generate_date_range(start_date, end_date)
 
     # Получаем даты с appointment в статусе confirmed/done
     appointment_stmt = select(Appointment.slot_id).where(
@@ -206,7 +205,7 @@ async def get_booked_dates(
     return list(result.scalars().all())
 
 
-async def _generate_date_range(start: date, end: date) -> list[date]:
+def _generate_date_range(start: date, end: date) -> list[date]:
     """Генерирует список дат между start и end включительно."""
     days = []
     current = start

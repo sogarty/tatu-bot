@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT))
 # Токен только из окружения. Если его нет — берём синтетический:
 # для проверки алгоритма подходит любой, важно лишь постоянство.
 TOKEN = os.environ.get("BOT_TOKEN", "").strip() or "123456789:SYNTHETIC_TOKEN"
+os.environ.setdefault("BOT_TOKEN", TOKEN)
 
 results: list[tuple[str, bool, str]] = []
 

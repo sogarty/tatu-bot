@@ -60,6 +60,22 @@ class NotificationService:
             await self._log(request_id, notification_type, chat_id, "failed", str(exc))
             return False
 
+    async def send_request_update(
+        self,
+        request_id: int,
+        chat_id: int,
+        text: str,
+        *,
+        notification_type: str,
+    ) -> bool:
+        """Send a request update with a mandatory audit reference."""
+        return await self.send_message(
+            chat_id,
+            text,
+            request_id=request_id,
+            notification_type=notification_type,
+        )
+
     async def _log(
         self,
         request_id: int | None,

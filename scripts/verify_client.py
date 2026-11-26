@@ -45,6 +45,7 @@ os.environ.update(
         "WEBHOOK_BASE_URL": "",
         "WEBHOOK_SECRET": "",
         "WEBAPP_URL": "https://example.test/app/",
+        "ALLOW_EPHEMERAL_DATABASE": "true",
         "DATABASE_URL": f"sqlite+aiosqlite:///{_DB_FILE}",
     }
 )
@@ -212,6 +213,88 @@ def main() -> int:
                   str(appt.get("slot_date")))
 
         # 12. Завершение
+        # Отмена должна освободить запись, а повторное назначение той же заявки
+        # не должно упасть из-за UNIQUE(request_id).
+        r = c.post(f"/api/v1/requests/{request_id}/cancel", headers=auth(MASTER_ID))
+        check("отмена записи возвращает заявку в очередь", r.status_code == 200 and
+              r.json().get("status") == "new", f"status={r.status_code}")
+
+        # A cancelled historical appointment must release its date for a
+        # different request too. This catches the old global UNIQUE(slot_id).
+        second_payload = {
+            **payload,
+            "description": "Вторая заявка для проверки освобождения даты",
+        }
+        r = c.post("/api/v1/requests", json=second_payload, headers=auth(CLIENT_ID + 1))
+        second_ok = r.status_code == 201
+        check("вторая заявка создаётся после отмены", second_ok,
+              f"status={r.status_code}")
+        if second_ok:
+            second_id = r.json()["id"]
+            for action, expected in (("accept", "accepted"), ("proceed", "in_progress")):
+                r = c.post(f"/api/v1/requests/{second_id}/{action}", headers=auth(MASTER_ID))
+                check(f"вторая заявка: {action}",
+                      r.status_code == 200 and r.json().get("status") == expected,
+                      f"status={r.status_code}")
+            r = c.post(
+                f"/api/v1/requests/{second_id}/schedule",
+                json={"slot_date": "2026-12-05"},
+                headers=auth(MASTER_ID),
+            )
+            check("другая заявка занимает освобождённую дату",
+                  r.status_code == 200 and r.json().get("status") == "scheduled",
+                  f"status={r.status_code}")
+            r = c.post(f"/api/v1/requests/{second_id}/cancel", headers=auth(MASTER_ID))
+            check("вторая заявка тоже освобождает дату",
+                  r.status_code == 200 and r.json().get("status") == "new",
+                  f"status={r.status_code}")
+
+        for action, expected in (("accept", "accepted"), ("proceed", "in_progress")):
+            r = c.post(f"/api/v1/requests/{request_id}/{action}", headers=auth(MASTER_ID))
+            check(f"повторное назначение: {action}",
+                  r.status_code == 200 and r.json().get("status") == expected,
+                  f"status={r.status_code}")
+        r = c.post(
+            f"/api/v1/requests/{request_id}/schedule",
+            json={"slot_date": "2026-12-05"},
+            headers=auth(MASTER_ID),
+        )
+        check("повторное назначение после отмены", r.status_code == 200 and
+              r.json().get("status") == "scheduled", f"status={r.status_code}")
+
+        # Закрытый мастером день нельзя назначить вручную через API.
+        r = c.post("/api/v1/slots/2026-12-20/toggle", headers=auth(MASTER_ID))
+        check("мастер закрывает дату для проверки", r.status_code == 200 and
+              r.json().get("is_blocked") is True, f"status={r.status_code}")
+
+        r = c.post(f"/api/v1/requests/{request_id}/cancel", headers=auth(MASTER_ID))
+        check("заявка освобождается перед проверкой закрытой даты",
+              r.status_code == 200 and r.json().get("status") == "new",
+              f"status={r.status_code}")
+        r = c.post(f"/api/v1/requests/{request_id}/accept", headers=auth(MASTER_ID))
+        check("заявка повторно принимается для проверки даты", r.status_code == 200,
+              f"status={r.status_code}")
+        r = c.post(f"/api/v1/requests/{request_id}/proceed", headers=auth(MASTER_ID))
+        check("заявка повторно переводится в работу", r.status_code == 200,
+              f"status={r.status_code}")
+        r = c.post(
+            f"/api/v1/requests/{request_id}/schedule",
+            json={"slot_date": "2026-12-20"},
+            headers=auth(MASTER_ID),
+        )
+        check("закрытая дата отклоняется", r.status_code == 409,
+              f"status={r.status_code}")
+
+        r = c.post(
+            f"/api/v1/requests/{request_id}/schedule",
+            json={"slot_date": "2026-12-06"},
+            headers=auth(MASTER_ID),
+        )
+        check("после отказа закрытой даты можно назначить свободную",
+              r.status_code == 200 and r.json().get("status") == "scheduled",
+              f"status={r.status_code}")
+
+        # 12. Завершение
         r = c.post(f"/api/v1/requests/{request_id}/complete", headers=auth(MASTER_ID))
         ok = r.status_code == 200 and r.json().get("status") == "completed"
         check("завершение сеанса → completed", ok, f"status={r.status_code}")
@@ -225,7 +308,7 @@ def main() -> int:
         busy = [d for d in days if d.get("is_booked")]
         check("календарь показывает занятую дату", bool(busy), f"занято: {len(busy)}")
         if busy:
-            check("занятая дата — 5 декабря", busy[0]["date"] == "2026-12-05", busy[0]["date"])
+            check("занятая дата — 6 декабря", busy[0]["date"] == "2026-12-06", busy[0]["date"])
 
         # 14. Дашборд мастера
         r = c.get("/api/v1/admin/dashboard", headers=auth(MASTER_ID))
@@ -255,15 +338,18 @@ def main() -> int:
         )
         check("недопустимый цвет → 422", r.status_code == 422, f"status={r.status_code}")
 
-        # 17. Мастер ставит дату в календаре
         r = c.post(
-            "/api/v1/slots/2026-12-20/toggle", headers=auth(MASTER_ID)
+            "/api/v1/requests",
+            json={**payload, "description": "          "},
+            headers=auth(CLIENT_ID),
         )
-        ok = r.status_code == 200 and r.json().get("is_blocked") is True
-        check("мастер закрывает день в календаре", ok, f"status={r.status_code}")
+        check("пустое после пробелов описание → 422", r.status_code == 422,
+              f"status={r.status_code}")
+
+        # 17. Мастер ставит дату в календаре
         r = c.post("/api/v1/slots/2026-12-20/toggle", headers=auth(MASTER_ID))
         ok = r.status_code == 200 and r.json().get("is_blocked") is False
-        check("мастер открывает день обратно", ok, f"status={r.status_code}")
+        check("мастер открывает дату обратно", ok, f"status={r.status_code}")
 
         # 18. Страница приложения отдаётся с нужными скриптами
         r = c.get("/app/")
@@ -293,6 +379,21 @@ def main() -> int:
         r = c.get("/api/v1/settings")
         check("цена срочности видна клиенту", r.status_code == 200,
               f"urgent_price={r.json().get('urgent_price')}")
+
+        # The client may display a price, but the server is authoritative.
+        urgent_payload = {
+            **payload,
+            "description": "Проверка серверной цены срочности",
+            "is_urgent": True,
+            "urgent_surcharge": 1,
+        }
+        r = c.post("/api/v1/requests", json=urgent_payload, headers=auth(CLIENT_ID))
+        check("срочная заявка создаётся", r.status_code == 201,
+              f"status={r.status_code}")
+        if r.status_code == 201:
+            check("сумма срочности берётся с сервера",
+                  float(r.json().get("urgent_surcharge") or 0) == 1500,
+                  str(r.json().get("urgent_surcharge")))
 
         # ── Клиент в карточке мастера ────────────────────────────────────
         # Старый бот показывал имя клиента; кабинет не должен его терять.
@@ -327,8 +428,8 @@ def main() -> int:
         r = c.get("/api/v1/slots/availability?start_date=2026-12-01&end_date=2026-12-31")
         days = {d["date"]: d for d in (r.json().get("days") or [])}
         check("день завершённого сеанса остаётся занятым",
-              days.get("2026-12-05", {}).get("is_booked") is True,
-              str(days.get("2026-12-05")))
+              days.get("2026-12-06", {}).get("is_booked") is True,
+              str(days.get("2026-12-06")))
 
         # ── Страница: разметка без дублей атрибута class ─────────────────
         check("нет дублирующегося атрибута class в index.html",
@@ -345,6 +446,12 @@ def main() -> int:
             "is_urgent": False,
         })
         archived_id = r.json()["id"]
+        r = c.post(f"/api/v1/requests/{archived_id}/accept", headers=auth(MASTER_ID))
+        check("архивная заявка переводится в accepted", r.status_code == 200,
+              f"status={r.status_code}")
+        r = c.post(f"/api/v1/requests/{archived_id}/reject", headers=auth(MASTER_ID))
+        check("архивная заявка переводится в rejected", r.status_code == 200,
+              f"status={r.status_code}")
         r = c.delete(f"/api/v1/trash/{archived_id}", headers=auth(MASTER_ID))
         check("мастер убирает заявку в архив → 204", r.status_code == 204,
               f"status={r.status_code}")

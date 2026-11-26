@@ -32,19 +32,28 @@ async def health(session: AsyncSession = Depends(get_db)):
 
     # Готов ли бот принимать сообщения (в webhook-режиме он создаётся на старте).
     bot_ready = False
+    webhook_ready = None
+    webhook_error = None
     try:
-        from app.main import bot as running_bot
+        from app.main import bot as running_bot, webhook_ready as running_webhook_ready, webhook_error as running_webhook_error
 
         bot_ready = running_bot is not None
+        webhook_ready = running_webhook_ready
+        webhook_error = running_webhook_error
     except Exception:  # pragma: no cover
         bot_ready = False
 
+    persistence_ok = persistent or settings.allow_ephemeral_database
+    webhook_ok = settings.mode != "webhook" or webhook_ready is True
+    health_ok = persistence_ok and webhook_ok
     payload = {
-        "status": "ok",
+        "status": "ok" if health_ok else "error",
         "database": "connected",
         "database_backend": backend,
         "data_persistent": persistent,
         "bot_ready": bot_ready,
+        "webhook_ready": webhook_ready,
+        "webhook_error": webhook_error,
         "master_configured": settings.master_tg_id > 0,
         "mode": settings.mode,
     }
@@ -61,4 +70,6 @@ async def health(session: AsyncSession = Depends(get_db)):
             },
         )
 
+    if settings.environment == "production" and not health_ok:
+        return JSONResponse(status_code=503, content=payload)
     return payload

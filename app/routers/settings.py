@@ -22,7 +22,7 @@ async def get_settings(
     result = await session.execute(select(BotSettings).where(BotSettings.id == 1))
     settings = result.scalar_one_or_none()
     if not settings:
-        settings = BotSettings()
+        settings = BotSettings(id=1)
         session.add(settings)
         await session.commit()
         await session.refresh(settings)
@@ -39,7 +39,7 @@ async def update_settings(
     result = await session.execute(select(BotSettings).where(BotSettings.id == 1))
     settings = result.scalar_one_or_none()
     if not settings:
-        settings = BotSettings()
+        settings = BotSettings(id=1)
         session.add(settings)
         await session.flush()
 

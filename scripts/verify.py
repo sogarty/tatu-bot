@@ -33,6 +33,7 @@ os.environ.setdefault("ENVIRONMENT", "production")
 os.environ.setdefault("WEBHOOK_BASE_URL", "")
 os.environ.setdefault("WEBHOOK_SECRET", "")
 os.environ.setdefault("WEBAPP_URL", "https://example.test/app/")
+os.environ["ALLOW_EPHEMERAL_DATABASE"] = "true"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_DB_FILE}"
 
 results: list[tuple[str, bool, str]] = []

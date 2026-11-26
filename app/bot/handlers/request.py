@@ -103,7 +103,13 @@ def register_handlers(dp):
     # ─── Finalization ───
     router.callback_query.register(
         handle_request_finalize,
-        F.data == "request_finalized",
+        F.data.startswith("request_finalized:"),
+    )
+
+    # Back navigation is shared by every FSM step.
+    router.callback_query.register(
+        handle_back,
+        F.data == "back",
     )
 
     # ─── Brief question handlers ───
@@ -533,7 +539,16 @@ async def handle_request_finalize(
 ):
     """Финализация заявки (черновик → new). P0-1."""
     data = await state.get_data()
+    callback_parts = (query.data or "").split(":", 1)
     request_id = data.get("request_id")
+    if len(callback_parts) == 2:
+        try:
+            callback_request_id = int(callback_parts[1])
+        except ValueError:
+            callback_request_id = None
+        if callback_request_id is None or callback_request_id != request_id:
+            await query.answer("Ошибка: заявка не совпадает с текущим черновиком")
+            return
 
     if not request_id:
         await query.answer("Ошибка: данные заявки не найдены")

@@ -4,10 +4,9 @@
 # настройки живут только в панели Render, их легко случайно сломать, и
 # непонятно, что именно запущено.
 #
-# ВАЖНО про данные: на бесплатном тарифе диск временный — база SQLite
-# стирается при каждом перезапуске. Поэтому для настоящей работы нужен
-# PostgreSQL (Neon). Пока DATABASE_URL не задан, приложение работает на
-# SQLite и данные теряются после перезапуска/сна. Это ожидаемо.
+# ВАЖНО про данные: production принимает только постоянный PostgreSQL.
+# Если DATABASE_URL не задан, приложение намеренно не проходит startup/health,
+# чтобы заявки не сохранялись в эфемерную SQLite-базу.
 #
 # Секреты сюда НЕ пишутся: sync: false означает «значение задаётся в панели
 # Render, в репозитории его нет».
@@ -20,7 +19,7 @@ services:
     region: frankfurt
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
+    healthCheckPath: /api/v1/health
     autoDeploy: true
     envVars:
       - key: BOT_TOKEN
@@ -37,9 +36,9 @@ services:
         value: webhook
       - key: ENVIRONMENT
         value: production
+      # Укажи точный origin Mini App без завершающего слеша.
       - key: ALLOWED_ORIGINS
-        value: "*"
-      # Для постоянного хранения данных задайте строку подключения Neon
-      # (postgresql+asyncpg://...). Пока пусто — используется SQLite.
+        sync: false
+      # Обязательная строка подключения Neon или другого PostgreSQL-провайдера.
       - key: DATABASE_URL
         sync: false

@@ -22,6 +22,7 @@ import time
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from httpx import AsyncClient, ASGITransport
+from app.config import get_settings
 
 # Добавляем deploy в path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -215,6 +216,20 @@ class TestVerifyInitData:
         result = verify_telegram_webapp_init_data(bot_token, init_data)
         
         assert result is None
+
+    def test_future_init_data_returns_none(self):
+        """initData from a clock far in the future must not be accepted."""
+        from app.auth import verify_telegram_webapp_init_data
+
+        auth_date = int(time.time()) + 3600
+        user_data = json.dumps({"id": 789})
+        params = {"auth_date": str(auth_date), "user": user_data}
+        computed_hash = sign_init_data(params)
+        init_data = f"auth_date={auth_date}&user={user_data}&hash={computed_hash}"
+
+        assert verify_telegram_webapp_init_data(
+            os.environ["BOT_TOKEN"], init_data
+        ) is None
     
     def test_invalid_user_json_returns_none(self):
         """Некорректный JSON в user возвращает None."""
@@ -246,42 +261,23 @@ class TestGetCurrentUser:
         """Отсутствие Authorization header → 401."""
         from app.auth import get_current_user
         from fastapi import HTTPException
-        
+        import asyncio
+
         with pytest.raises(HTTPException) as exc_info:
-            # get_current_user без header вызовет 401
-            from app.config import get_settings
-            settings = get_settings()
-            import asyncio
-            from unittest.mock import patch
-            
-            # Mock get_settings to return test settings
-            async def mock_call():
-                from app.auth import get_current_user
-                from fastapi import Depends, Header
-            
-            # Тестируем напрямую через raise
-            raise HTTPException(status_code=401, detail="Authorization header отсутствует")
-        
+            asyncio.run(get_current_user(None, get_settings()))
+
         assert exc_info.value.status_code == 401
     
     def test_invalid_prefix_raises_401(self):
         """Неверный префикс Authorization → 401."""
-        from fastapi import HTTPException
         import asyncio
-        
-        from app.auth import verify_telegram_webapp_init_data
+        from app.auth import get_current_user
         from app.config import get_settings
-        
-        # Тестируем логику в get_current_user
-        settings = get_settings()
-        
-        # Simulate: authorization = "Bearer invalid_data"
-        authorization = "Bearer invalid_data"
-        prefix = "TelegramWebApp "
-        
-        if not authorization.startswith(prefix):
-            # Это вызовет HTTPException 401
-            assert True  # Условие срабатывает
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_current_user("Bearer invalid_data", get_settings()))
+        assert exc_info.value.status_code == 401
     
     def test_valid_init_data_returns_user_dict(self):
         """Валидный initData → user_id и is_admin."""
@@ -341,17 +337,21 @@ class TestAdminOnly:
     
     def test_admin_passes(self):
         """Admin проходит проверку admin_only."""
-        current_user = {"user_id": 42, "is_admin": True}
-        
-        assert current_user.get("is_admin") is True
+        from app.auth import admin_only
+        import asyncio
+
+        result = asyncio.run(admin_only({"user_id": 42, "is_admin": True}))
+        assert result["user_id"] == 42
     
     def test_non_admin_rejected(self):
         """Не-admin отклоняется admin_only."""
-        current_user = {"user_id": 999, "is_admin": False}
-        
-        with pytest.raises(Exception):  # HTTPException
-            if not current_user.get("is_admin"):
-                raise Exception("403 Forbidden")
+        from app.auth import admin_only
+        from fastapi import HTTPException
+        import asyncio
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(admin_only({"user_id": 999, "is_admin": False}))
+        assert exc_info.value.status_code == 403
 
 
 # ─── 4. owner_of_request (4 теста) ──────────────────────────────────────────
@@ -378,13 +378,19 @@ class TestOwnerOfRequest:
     
     def test_non_owner_gets_not_found(self):
         """Не-владелец получает 404."""
-        current_user = {"user_id": 100, "is_admin": False}
-        request_user_id = 200  # different user
-        
-        # Ownership check fails
-        if not current_user.get("is_admin"):
-            if request_user_id != current_user["user_id"]:
-                assert True  # Would raise RequestNotFoundError
+        from app.auth import load_request_for_user
+        from app.dependencies import RequestNotFoundError
+        from sqlalchemy.engine import Result
+        import asyncio
+
+        session = AsyncMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = MagicMock(user_id=200)
+        session.execute.return_value = result
+        with pytest.raises(RequestNotFoundError):
+            asyncio.run(load_request_for_user(
+                1, session, {"user_id": 100, "is_admin": False}
+            ))
     
     def test_request_not_found_raises_404(self):
         """Несуществующая заявка → 404."""

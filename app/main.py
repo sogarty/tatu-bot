@@ -20,6 +20,7 @@ from app.routers.requests import router as requests_router
 from app.routers.slots import router as slots_router
 from app.routers.settings import router as settings_router
 from app.routers.admin import router as admin_router
+from app.routers.portfolio import router as portfolio_router
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -29,6 +30,8 @@ settings = get_settings()
 
 bot: Bot | None = None
 dp = None  # Dispatcher (импортируется лениво)
+webhook_ready = False
+webhook_error: str | None = None
 
 
 def _create_bot() -> Bot:
@@ -55,9 +58,37 @@ def _create_dp():
     return local_dp
 
 
+def _validate_production_config() -> None:
+    """Fail early when production cannot receive Telegram updates safely."""
+    if settings.environment != "production":
+        return
+
+    missing = []
+    if not settings.bot_token or settings.bot_token.startswith("test_"):
+        missing.append("BOT_TOKEN")
+    if settings.master_tg_id <= 0:
+        missing.append("MASTER_TG_ID")
+    if settings.mode == "webhook":
+        if not settings.webhook_base_url.startswith("https://"):
+            missing.append("WEBHOOK_BASE_URL (HTTPS)")
+        if not settings.webhook_secret:
+            missing.append("WEBHOOK_SECRET")
+    if not settings.webapp_url or not settings.webapp_url.startswith("https://"):
+        missing.append("WEBAPP_URL (HTTPS)")
+    if not settings.allowed_origins_list or settings.allowed_origins_list == ["*"]:
+        missing.append("ALLOWED_ORIGINS (exact origin)")
+    if missing:
+        raise RuntimeError(
+            "Production configuration is incomplete: " + ", ".join(missing)
+        )
+
+
 async def _set_webhook(bot_instance: Bot, url: str, secret: str) -> None:
     """Асинхронно устанавливает webhook с повторами при TelegramRetryAfter."""
+    global webhook_ready, webhook_error
     max_retries = 5
+    webhook_ready = False
+    webhook_error = None
     for attempt in range(1, max_retries + 1):
         try:
             await bot_instance.set_webhook(
@@ -73,6 +104,7 @@ async def _set_webhook(bot_instance: Bot, url: str, secret: str) -> None:
             # result — True при успехе
             host = url.split("://", 1)[-1].split("/")[0] if "://" in url else url
             logger.info("Webhook установлен: %s", host)
+            webhook_ready = True
             return
         except TelegramRetryAfter as e:
             wait_seconds = e.retry_after + 3
@@ -84,13 +116,17 @@ async def _set_webhook(bot_instance: Bot, url: str, secret: str) -> None:
             await asyncio.sleep(wait_seconds)
         except Exception as e:
             logger.error("Ошибка при установке webhook (попытка %d/%d): %s", attempt, max_retries, e)
+            webhook_error = str(e)[:200]
             break
+    if not webhook_error:
+        webhook_error = "Не удалось установить webhook после повторных попыток"
     logger.error("Не удалось установить webhook после %d попыток", max_retries)
 
 
 async def _init_db_and_tables() -> None:
     """Создаёт таблицы БД и начальные данные."""
-    from app.database import init_db
+    from app.database import ensure_production_database, init_db
+    ensure_production_database()
     await init_db()
 
 
@@ -102,11 +138,10 @@ async def lifespan(app: FastAPI):
     # ── startup ──────────────────────────────────────────────────────────
     logger.info("=== Точка входа FastAPI ===")
     logger.info("Режим: %s", settings.mode)
+    _validate_production_config()
 
     # Создаём бота один раз
     bot = _create_bot()
-
-    _webhook_task: asyncio.Task | None = None
 
     if settings.mode == "webhook":
         # Dispatcher нужен ВСЕГДА в webhook-режиме: без него /webhook
@@ -115,30 +150,30 @@ async def lifespan(app: FastAPI):
 
         if settings.webhook_base_url:
             webhook_url = settings.webhook_base_url.rstrip("/") + "/webhook"
-            # ВАЖНО: установка webhook — фоновая задача. На бесплатном
-            # хостинге контейнер стартует медленно, и если ждать ответа
-            # Telegram, всё приложение (включая Mini App) не отвечает,
-            # пока этот вызов не завершится. Пусть сайт поднимется сразу.
-            _webhook_task = asyncio.create_task(
-                _set_webhook(bot, webhook_url, settings.webhook_secret)
-            )
+            # Readiness must not report a healthy service before Telegram is
+            # actually pointed at this instance. Telegram queues updates while
+            # the service is starting, so waiting here is safer than exposing a
+            # green but unreachable webhook.
+            await _set_webhook(bot, webhook_url, settings.webhook_secret)
+            if not webhook_ready:
+                raise RuntimeError(webhook_error or "Webhook setup failed")
         else:
             logger.warning(
                 "WEBHOOK_BASE_URL не задан — webhook не устанавливается. "
                 "Бот не сможет получать сообщения."
             )
 
-    # Инициализация БД (создание таблиц) — не требует alembic
+    # Инициализация БД и применение Alembic-миграций.
     try:
         await _init_db_and_tables()
     except Exception:
-        logger.error("Не удалось инициализировать БД (продолжаем работу)", exc_info=True)
+        logger.error("Не удалось инициализировать БД", exc_info=True)
+        if settings.environment == "production":
+            raise
 
     yield
 
     # ── shutdown ─────────────────────────────────────────────────────────
-    if _webhook_task and not _webhook_task.done():
-        _webhook_task.cancel()
     if bot:
         await bot.session.close()
         logger.info("Сессия бота закрыта")
@@ -167,6 +202,7 @@ app.include_router(requests_router, prefix="/api/v1")
 app.include_router(slots_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(portfolio_router, prefix="/api/v1")
 
 # ─── Mini App статика ──────────────────────────────────────────────────────
 # main.py лежит в deploy/app/, а папка web — в deploy/. Отсюда parent.parent.

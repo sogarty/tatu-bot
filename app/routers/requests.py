@@ -8,12 +8,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import date as date_type
+from datetime import date as date_type, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,6 +25,12 @@ from app.auth import (
     owner_of_request,
 )
 from app.database import get_db
+from app.bot.services.request_service import (
+    cancel_appointment as cancel_request_appointment,
+    complete_session,
+    transition_status,
+)
+from app.bot.services.notification_service import NotificationService
 from app.dependencies import (
     BadRequestError,
     ConflictError,
@@ -32,6 +39,7 @@ from app.dependencies import (
 )
 from app.models import (
     Appointment,
+    BotSettings,
     MasterSlot,
     TattooRequest,
     TgUser,
@@ -76,15 +84,24 @@ async def _ensure_user(
         return
 
     data = user_data or {}
-    session.add(
-        TgUser(
-            tg_id=user_id,
-            first_name=(data.get("first_name") or "Гость")[:100],
-            last_name=(data.get("last_name") or None),
-            username=(data.get("username") or None),
-        )
-    )
-    await session.flush()
+    try:
+        # The savepoint converts two simultaneous first requests from the same
+        # Telegram user into one successful insert plus one re-read, instead of
+        # leaking a unique-key 500 to the client.
+        async with session.begin_nested():
+            session.add(
+                TgUser(
+                    tg_id=user_id,
+                    first_name=(data.get("first_name") or "Гость")[:100],
+                    last_name=(data.get("last_name") or None),
+                    username=(data.get("username") or None),
+                )
+            )
+            await session.flush()
+    except IntegrityError:
+        existing = await session.execute(select(TgUser).where(TgUser.tg_id == user_id))
+        if existing.scalar_one_or_none() is None:
+            raise
 
 
 def _validate_transition(current: str, target: str) -> None:
@@ -149,6 +166,7 @@ async def create_request(
     data: TattooRequestCreate,
     session: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """Создаёт заявку сразу в статусе 'new' (то есть отправленную).
 
@@ -158,6 +176,32 @@ async def create_request(
     user_id: int = current_user["user_id"]
     await _ensure_user(session, user_id, current_user.get("user"))
 
+    if idempotency_key:
+        idempotency_key = idempotency_key.strip()
+        if len(idempotency_key) > 100:
+            raise HTTPException(status_code=400, detail="Слишком длинный Idempotency-Key")
+        existing = (
+            await session.execute(
+                select(TattooRequest)
+                .where(
+                    TattooRequest.user_id == user_id,
+                    TattooRequest.idempotency_key == idempotency_key,
+                )
+                .options(*_FULL_OPTIONS)
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return existing
+
+    # The surcharge is a server-side price. Never trust a client-submitted
+    # amount, otherwise a caller can set it to any value or avoid the price.
+    urgent_surcharge = None
+    if data.is_urgent:
+        settings_row = (
+            await session.execute(select(BotSettings).where(BotSettings.id == 1))
+        ).scalar_one_or_none()
+        urgent_surcharge = float(settings_row.urgent_price or 0) if settings_row else 0
+
     req = TattooRequest(
         user_id=user_id,
         created_by=user_id,
@@ -166,12 +210,32 @@ async def create_request(
         size=data.size.strip(),
         color_mode=data.color_mode,
         is_urgent=bool(data.is_urgent),
-        urgent_surcharge=data.urgent_surcharge,
+        urgent_surcharge=urgent_surcharge,
         brief_answers=data.brief_answers or None,
+        idempotency_key=idempotency_key or None,
         status="new",
     )
     session.add(req)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # A concurrent retry may win the unique constraint between the lookup
+        # above and commit. Return that request and do not notify twice.
+        await session.rollback()
+        if idempotency_key:
+            existing = (
+                await session.execute(
+                    select(TattooRequest)
+                    .where(
+                        TattooRequest.user_id == user_id,
+                        TattooRequest.idempotency_key == idempotency_key,
+                    )
+                    .options(*_FULL_OPTIONS)
+                )
+            ).scalar_one_or_none()
+            if existing:
+                return existing
+        raise
 
     # Перечитываем со связями, иначе сериализация упадёт
     created = await _load_locked(session, req.id)
@@ -182,7 +246,6 @@ async def create_request(
 async def _notify_master_new_request(req: TattooRequest) -> None:
     """Сообщает мастеру о новой заявке. Ошибка не ломает создание."""
     try:
-        from app.bot.services.notification_service import NotificationService
         from app.config import get_settings
 
         settings = get_settings()
@@ -214,9 +277,40 @@ async def _notify_master_new_request(req: TattooRequest) -> None:
             "цветная" if req.color_mode == "color" else "чёрно-белая",
             "\n⚡ срочная" if req.is_urgent else "",
         )
-        await service.send_message(settings.master_tg_id, text)
+        await service.send_request_update(
+            req.id,
+            settings.master_tg_id,
+            text,
+            notification_type="request_created",
+        )
     except Exception:
         logger.exception("Не удалось уведомить мастера о заявке #%s", req.id)
+
+
+async def _notify_request_client(
+    req: TattooRequest,
+    text: str,
+    notification_type: str,
+) -> None:
+    """Notify the request owner after commit; delivery never rolls back data."""
+    try:
+        from app.main import bot as running_bot
+
+        if running_bot is None or req.user is None:
+            logger.warning(
+                "Невозможно уведомить клиента по заявке #%s: bot/user unavailable",
+                req.id,
+            )
+            return
+        service = NotificationService(running_bot)
+        await service.send_request_update(
+            req.id,
+            req.user.tg_id,
+            text,
+            notification_type=notification_type,
+        )
+    except Exception:
+        logger.exception("Не удалось уведомить клиента по заявке #%s", req.id)
 
 
 # ─── GET /api/v1/requests ───────────────────────────────────────────────────
@@ -320,11 +414,15 @@ async def accept_request(
     _admin: dict = Depends(admin_only),
 ):
     """Мастер принимает заявку (new → accepted)."""
-    req = await _load_locked(session, request_id)
-    _validate_transition(req.status, "accepted")
-    req.status = "accepted"
+    req = await transition_status(session, request_id, "accepted")
     await session.commit()
-    return await _load_locked(session, request_id)
+    result = await _load_locked(session, request_id)
+    await _notify_request_client(
+        result,
+        NotificationService.request_accepted(request_id),
+        "request_accepted",
+    )
+    return result
 
 
 class RejectPayload(BaseModel):
@@ -339,13 +437,21 @@ async def reject_request(
     _admin: dict = Depends(admin_only),
 ):
     """Мастер отклоняет заявку."""
-    req = await _load_locked(session, request_id)
-    _validate_transition(req.status, "rejected")
-    req.status = "rejected"
-    if data and data.reason:
-        req.rejection_reason = data.reason
+    reason = data.reason if data and data.reason else None
+    req = await transition_status(
+        session,
+        request_id,
+        "rejected",
+        extra_fields={"rejection_reason": reason},
+    )
     await session.commit()
-    return await _load_locked(session, request_id)
+    result = await _load_locked(session, request_id)
+    await _notify_request_client(
+        result,
+        NotificationService.request_rejected(request_id, reason),
+        "request_rejected",
+    )
+    return result
 
 
 @router.post("/requests/{request_id}/proceed", response_model=TattooRequestOut)
@@ -355,11 +461,15 @@ async def proceed_to_sketch(
     _admin: dict = Depends(admin_only),
 ):
     """Мастер берётся за эскиз (accepted → in_progress)."""
-    req = await _load_locked(session, request_id)
-    _validate_transition(req.status, "in_progress")
-    req.status = "in_progress"
+    req = await transition_status(session, request_id, "in_progress")
     await session.commit()
-    return await _load_locked(session, request_id)
+    result = await _load_locked(session, request_id)
+    await _notify_request_client(
+        result,
+        NotificationService.request_in_progress(request_id),
+        "request_in_progress",
+    )
+    return result
 
 
 class SchedulePayload(BaseModel):
@@ -384,14 +494,37 @@ async def schedule_request(
 
     slot = (
         await session.execute(
-            select(MasterSlot).where(MasterSlot.slot_date == target_date)
+            select(MasterSlot)
+            .where(MasterSlot.slot_date == target_date)
+            .with_for_update()
         )
     ).scalar_one_or_none()
 
     if not slot:
-        slot = MasterSlot(slot_date=target_date, is_blocked=True)
-        session.add(slot)
-        await session.flush()
+        slot = MasterSlot(slot_date=target_date, is_blocked=False)
+        try:
+            # Keep the request transaction alive if another worker wins the
+            # unique slot_date insert. A plain session.rollback() here would
+            # discard the locked request and any preceding changes.
+            async with session.begin_nested():
+                session.add(slot)
+                await session.flush()
+        except IntegrityError:
+            # Another request created this date concurrently. The savepoint
+            # has been rolled back; lock and reuse the existing slot.
+            req = await _load_locked(session, request_id)
+            slot = (
+                await session.execute(
+                    select(MasterSlot)
+                    .where(MasterSlot.slot_date == target_date)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if slot is None:
+                raise ConflictError("Не удалось создать слот, повторите попытку")
+
+    if slot.is_blocked:
+        raise ConflictError(f"Дата {target_date} закрыта мастером")
 
     busy = await session.execute(
         select(Appointment).where(
@@ -402,10 +535,40 @@ async def schedule_request(
     if busy.scalar_one_or_none():
         raise ConflictError(f"На дату {target_date} уже есть активная запись")
 
-    session.add(Appointment(request_id=req.id, slot_id=slot.id, status="confirmed"))
-    req.status = "scheduled"
-    await session.commit()
-    return await _load_locked(session, request_id)
+    appointment = req.appointment
+    if appointment is not None:
+        if appointment.status in ("confirmed", "done"):
+            raise ConflictError("У заявки уже есть активная запись")
+        # Reuse the existing row after cancellation because request_id is unique.
+        appointment.slot_id = slot.id
+        appointment.status = "confirmed"
+    else:
+        appointment = Appointment(
+            request_id=req.id,
+            slot_id=slot.id,
+            status="confirmed",
+        )
+        session.add(appointment)
+    # The session deliberately uses autoflush=False. Persist the reused (or
+    # newly created) appointment before transition_status refreshes the locked
+    # request with populate_existing, otherwise a cancelled historical row can
+    # overwrite this in-memory confirmed state.
+    await session.flush()
+    await transition_status(session, request_id, "scheduled")
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ConflictError("На эту дату уже назначен другой сеанс") from exc
+    result = await _load_locked(session, request_id)
+    await _notify_request_client(
+        result,
+        NotificationService.appointment_scheduled(
+            request_id, target_date.isoformat()
+        ),
+        "appointment_scheduled",
+    )
+    return result
 
 
 @router.post("/requests/{request_id}/complete", response_model=TattooRequestOut)
@@ -415,16 +578,15 @@ async def complete_request(
     _admin: dict = Depends(admin_only),
 ):
     """Завершить сеанс (scheduled → completed)."""
-    req = await _load_locked(session, request_id)
-    _validate_transition(req.status, "completed")
-
-    if not req.appointment:
-        raise BadRequestError("У заявки нет активной записи")
-
-    req.appointment.status = "done"
-    req.status = "completed"
+    req = await complete_session(session, request_id)
     await session.commit()
-    return await _load_locked(session, request_id)
+    result = await _load_locked(session, request_id)
+    await _notify_request_client(
+        result,
+        NotificationService.appointment_completed(request_id),
+        "appointment_completed",
+    )
+    return result
 
 
 @router.post("/requests/{request_id}/cancel", response_model=TattooRequestOut)
@@ -434,17 +596,15 @@ async def cancel_appointment(
     _admin: dict = Depends(admin_only),
 ):
     """Отменить запись, вернуть заявку в очередь."""
-    req = await _load_locked(session, request_id)
-
-    if not req.appointment:
-        raise BadRequestError("У заявки нет активной записи")
-
-    req.appointment.status = "cancelled"
-    if req.status == "scheduled":
-        req.status = "new"
-
+    req = await cancel_request_appointment(session, request_id)
     await session.commit()
-    return await _load_locked(session, request_id)
+    result = await _load_locked(session, request_id)
+    await _notify_request_client(
+        result,
+        NotificationService.appointment_cancelled(request_id),
+        "appointment_cancelled",
+    )
+    return result
 
 
 @router.post("/requests/{request_id}/reactivate", response_model=TattooRequestOut)
@@ -484,6 +644,7 @@ async def get_trash(
     stmt = (
         select(TattooRequest)
         .where(TattooRequest.status.in_(["completed", "rejected", "cancelled"]))
+        .where(TattooRequest.is_archived == False)  # noqa: E712
         .options(*_FULL_OPTIONS)
         .order_by(TattooRequest.updated_at.desc())
         .offset(offset)
@@ -503,6 +664,9 @@ async def delete_from_trash(
     req = await session.get(TattooRequest, request_id)
     if not req:
         raise RequestNotFoundError()
+
+    if req.status not in ("completed", "rejected", "cancelled"):
+        raise BadRequestError("В корзину можно убрать только закрытую заявку")
 
     req.is_archived = True
     await session.commit()

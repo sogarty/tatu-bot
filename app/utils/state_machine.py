@@ -8,6 +8,8 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     "new": frozenset({"accepted", "rejected"}),
     "accepted": frozenset({"in_progress", "rejected", "new"}),
     "in_progress": frozenset({"scheduled", "rejected", "accepted"}),
+    # `scheduled -> new` is deliberately absent: cancellation must go through
+    # the paired appointment operation in request_service.
     "scheduled": frozenset({"completed", "cancelled"}),
     "completed": frozenset(),
     "rejected": frozenset({"new"}),

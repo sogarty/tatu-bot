@@ -10,6 +10,8 @@ from sqlalchemy import (
     Date,
     ForeignKey,
     Integer,
+    Index,
+    LargeBinary,
     Numeric,
     SmallInteger,
     String,
@@ -17,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     func,
+    text,
     true,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TEXT
@@ -119,6 +122,27 @@ class TattooRequest(Base):
             f"status IN {tuple(REQUEST_STATUSES)}",
             name="ck_tattoo_request_status",
         ),
+        # Queue positions are unique among active requests. NULL means that a
+        # request is intentionally outside the queue.
+        Index(
+            "uq_active_queue_rank",
+            "queue_rank",
+            unique=True,
+            postgresql_where=text(
+                "queue_rank IS NOT NULL AND status IN "
+                "('accepted', 'in_progress')"
+            ),
+            sqlite_where=text(
+                "queue_rank IS NOT NULL AND status IN "
+                "('accepted', 'in_progress')"
+            ),
+        ),
+        Index(
+            "uq_tattoo_request_user_idempotency",
+            "user_id",
+            "idempotency_key",
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
@@ -138,6 +162,7 @@ class TattooRequest(Base):
         BigInteger, ForeignKey("tg_user.tg_id", ondelete="CASCADE"), nullable=False
     )
     brief_answers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     queue_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     queue_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -293,7 +318,15 @@ class Appointment(Base):
             f"status IN {tuple(APPOINTMENT_STATUSES)}",
             name="ck_appointment_status",
         ),
-        UniqueConstraint("slot_id", name="uq_appointment_slot_id"),  # P0 — критично!
+        # Cancelled appointments are retained for history, but must not reserve
+        # a date. Only confirmed and completed appointments occupy a slot.
+        Index(
+            "uq_appointment_active_slot_id",
+            "slot_id",
+            unique=True,
+            postgresql_where=text("status IN ('confirmed', 'done')"),
+            sqlite_where=text("status IN ('confirmed', 'done')"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
@@ -399,3 +432,41 @@ class MasterWhitelist(Base):
 
     def __repr__(self) -> str:
         return f"<MasterWhitelist tg_id={self.tg_id}>"
+
+
+# ─── portfolio_item ──────────────────────────────────────────────────────────
+
+
+class PortfolioItem(Base):
+    """A published or draft work shown in the public Mini App portfolio.
+
+    Existing works use a deployed static path. New uploads are stored in the
+    database so Render's ephemeral filesystem cannot delete them on restart.
+    """
+
+    __tablename__ = "portfolio_item"
+
+    __table_args__ = (
+        Index("ix_portfolio_item_published_sort", "is_published", "sort_order"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    place: Mapped[str] = mapped_column(String(120), nullable=False)
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    image_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    image_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    is_published: Mapped[bool] = mapped_column(
+        Boolean, server_default=true(), nullable=False
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<PortfolioItem id={self.id} title={self.title!r} published={self.is_published}>"

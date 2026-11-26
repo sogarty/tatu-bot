@@ -56,7 +56,7 @@ async def add_to_whitelist(
 
     entry = MasterWhitelist(tg_id=data.tg_id)
     session.add(entry)
-    await session.flush()
+    await session.commit()
     return {"tg_id": data.tg_id, "status": "added"}
 
 
@@ -76,5 +76,5 @@ async def remove_from_whitelist(
         raise HTTPException(status_code=404, detail="Мастер не найден в whitelist")
 
     await session.delete(entry)
-    await session.flush()
+    await session.commit()
     return {"tg_id": tg_id, "status": "removed"}

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Sequence
 
 from sqlalchemy import select, func, update
@@ -21,6 +21,10 @@ from app.models import (
     NotificationLog,
     RequestReference,
     TattooRequest,
+)
+from app.bot.services.queue_service import (
+    add_to_queue,
+    remove_from_queue,
 )
 from app.schemas import (
     TattooRequestCreate,
@@ -107,7 +111,7 @@ async def finalize_request(
 
     # P0-1: Меняем status на 'new'
     req.status = "new"
-    req.updated_at = datetime.utcnow()
+    req.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
     # Сохраняем референсы
     if references:
@@ -136,7 +140,7 @@ async def get_request_by_id(
         .options(
             selectinload(TattooRequest.references),
             selectinload(TattooRequest.brief_questions),
-            selectinload(TattooRequest.appointment),
+            selectinload(TattooRequest.appointment).selectinload(Appointment.slot),
         )
     )
     result = await session.execute(stmt)
@@ -171,8 +175,7 @@ async def list_requests(
 
 async def archive_old_requests(session: AsyncSession) -> int:
     """Помечает завершённые заявки старше 30 дней как архивные."""
-    from datetime import timedelta
-    cutoff = datetime.utcnow() - timedelta(days=30)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
 
     stmt = (
         update(TattooRequest)
@@ -207,25 +210,47 @@ async def transition_status(
     stmt = (
         select(TattooRequest)
         .where(TattooRequest.id == request_id)
+        .options(selectinload(TattooRequest.appointment).selectinload(Appointment.slot))
         .with_for_update()  # Блокировка строки
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     req = result.scalar_one_or_none()
     if not req:
         raise RequestNotFoundError()
 
-    if not is_valid_transition(req.status, new_status):
+    old_status = req.status
+    if not is_valid_transition(old_status, new_status):
         raise InvalidTransitionError(
-            f"Недопустимый переход: {req.status} → {new_status}"
+            f"Недопустимый переход: {old_status} → {new_status}"
         )
 
-    old_status = req.status
+    # Queue mutations happen in the same transaction as the status change.
+    # Remove first while the request still has an active status, otherwise the
+    # query intentionally excludes it from the queue.
+    active_statuses = {"accepted", "in_progress"}
+    if old_status in active_statuses and new_status not in active_statuses:
+        await remove_from_queue(session, request_id)
+
+    # Validate paired appointment operations before mutating the request. This
+    # keeps a direct service caller from being left with a dirty object when
+    # the appointment invariant is violated.
+    if new_status in {"completed", "cancelled"} and (
+        req.appointment is None or req.appointment.status != "confirmed"
+    ):
+        raise InvalidTransitionError("У заявки нет активной записи")
+
     req.status = new_status
-    req.updated_at = datetime.utcnow()
+    req.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
     # Устанавливаем timestamp в зависимости от статуса
-    now = datetime.utcnow()
-    if new_status == "accepted":
+    now = datetime.now(UTC).replace(tzinfo=None)
+    if new_status == "accepted" and (
+        old_status not in active_statuses or req.queue_rank is None
+    ):
+        req.accepted_at = now
+        await add_to_queue(session, request_id)
+    elif new_status == "accepted":
         req.accepted_at = now
     elif new_status == "rejected":
         req.rejected_at = now
@@ -233,6 +258,9 @@ async def transition_status(
         req.assigned_at = now
     elif new_status == "completed":
         req.completed_at = now
+        req.appointment.status = "done"
+    elif new_status == "cancelled":
+        req.appointment.status = "cancelled"
 
     # Дополнительные поля
     if extra_fields:
@@ -266,7 +294,7 @@ async def reset_rejection(
     req.rejected_at = None
     req.queue_order = None
     req.queue_rank = None
-    req.updated_at = datetime.utcnow()
+    req.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
     await session.flush()
     return req
@@ -283,24 +311,35 @@ async def cancel_appointment(
     stmt = (
         select(TattooRequest)
         .where(TattooRequest.id == request_id)
-        .options(selectinload(TattooRequest.appointment))
+        .options(selectinload(TattooRequest.appointment).selectinload(Appointment.slot))
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     req = result.scalar_one_or_none()
     if not req:
         raise RequestNotFoundError()
 
-    if not req.appointment:
+    if req.status != "scheduled":
+        raise InvalidTransitionError("Отменить можно только назначенную запись")
+    if not req.appointment or req.appointment.status != "confirmed":
         raise InvalidTransitionError("У заявки нет активной записи")
 
+    await remove_from_queue(session, request_id)
     # Отменяем appointment
     req.appointment.status = "cancelled"
 
-    # Возвращаем заявку в new
-    if is_valid_transition(req.status, "new"):
+    # Cancellation deliberately reopens a scheduled request. This is a
+    # business operation that also releases the appointment, so it is more
+    # specific than the generic status transition table.
+    if req.status == "scheduled":
         req.status = "new"
-        req.updated_at = datetime.utcnow()
+        req.assigned_at = None
+        req.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    elif is_valid_transition(req.status, "new"):
+        req.status = "new"
+        req.assigned_at = None
+        req.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
     await session.flush()
     return req
@@ -315,17 +354,21 @@ async def complete_session(
     stmt = (
         select(TattooRequest)
         .where(TattooRequest.id == request_id)
-        .options(selectinload(TattooRequest.appointment))
+        .options(selectinload(TattooRequest.appointment).selectinload(Appointment.slot))
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     req = result.scalar_one_or_none()
     if not req:
         raise RequestNotFoundError()
 
-    if not req.appointment:
+    if req.status != "scheduled":
+        raise InvalidTransitionError("Завершить можно только назначенную запись")
+    if not req.appointment or req.appointment.status != "confirmed":
         raise InvalidTransitionError("У заявки нет активной записи")
 
+    await remove_from_queue(session, request_id)
     # Завершаем appointment
     req.appointment.status = "done"
 
@@ -346,8 +389,9 @@ async def complete_session(
 
     # Обновляем статус заявки
     req.status = "completed"
-    req.completed_at = datetime.utcnow()
-    req.updated_at = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
+    req.completed_at = now
+    req.updated_at = now
 
     await session.flush()
     return req

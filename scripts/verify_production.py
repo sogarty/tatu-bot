@@ -82,6 +82,16 @@ def main() -> int:
     status, body = call(base, "/api/v1/me", None)
     check("без авторизации → 401", status == 401, f"status={status}")
 
+    status, body = call(base, "/api/v1/health", None)
+    try:
+        health = json.loads(body)
+    except (TypeError, json.JSONDecodeError):
+        health = {}
+    check("health → 200", status == 200, f"status={status}")
+    check("production использует постоянную БД",
+          status == 200 and health.get("data_persistent") is True,
+          str(health))
+
     status, body = call(base, "/api/v1/me", "auth_date=1&user=%7B%7D&hash=deadbeef")
     check("поддельная подпись → 401", status == 401, f"status={status}")
 

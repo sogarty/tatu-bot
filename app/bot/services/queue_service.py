@@ -8,14 +8,15 @@ FALSE из PostgreSQL и падали бы на SQLite ("no such function: NOW")
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import TattooRequest
 
-ACTIVE_STATUSES = ("accepted", "in_progress", "scheduled")
+# A scheduled request owns a calendar appointment, not a queue position.
+ACTIVE_STATUSES = ("accepted", "in_progress")
 
 
 async def _advisory_lock(session: AsyncSession) -> None:
@@ -26,11 +27,10 @@ async def _advisory_lock(session: AsyncSession) -> None:
     """
     if session.bind is None or session.bind.dialect.name != "postgresql":
         return
-    try:
-        await session.execute(text("SELECT pg_advisory_xact_lock(74562)"))
-    except Exception:
-        # Блокировка — вспомогательный механизм, не повод ронять операцию.
-        pass
+    # A failed lock is a correctness failure, not a recoverable warning. If
+    # PostgreSQL cannot provide serialization, the caller must roll back rather
+    # than assign duplicate queue positions.
+    await session.execute(text("SELECT pg_advisory_xact_lock(74562)"))
 
 
 async def get_next_queue_rank(session: AsyncSession) -> int:
@@ -57,7 +57,7 @@ async def add_to_queue(session: AsyncSession, request_id: int) -> int:
 
     req.queue_rank = rank
     req.queue_order = rank
-    req.updated_at = datetime.now()
+    req.updated_at = datetime.now(UTC).replace(tzinfo=None)
     await session.flush()
     return rank
 
@@ -75,16 +75,27 @@ async def remove_from_queue(session: AsyncSession, request_id: int) -> None:
     )
     requests = list(result.scalars().all())
 
-    removed_rank: int | None = None
+    removed = next((req for req in requests if req.id == request_id), None)
+    if removed is None:
+        return
+
+    # Move ranks out of the unique-index domain before compacting. Updating
+    # rank 2 to rank 1 while rank 1 still exists would otherwise violate the
+    # partial unique index on PostgreSQL.
+    for index, req in enumerate(requests, start=1):
+        req.queue_rank = -index
+        req.queue_order = -index
+    await session.flush()
+
+    next_rank = 1
     for req in requests:
         if req.id == request_id:
-            removed_rank = req.queue_rank
             req.queue_rank = None
             req.queue_order = None
-        elif removed_rank is not None and req.queue_rank is not None:
-            if req.queue_rank > removed_rank:
-                req.queue_rank -= 1
-                req.queue_order = req.queue_rank
+            continue
+        req.queue_rank = next_rank
+        req.queue_order = next_rank
+        next_rank += 1
 
     await session.flush()
 
@@ -100,33 +111,15 @@ async def recalculate_ranks(session: AsyncSession) -> None:
         .order_by(TattooRequest.queue_rank)
         .with_for_update()
     )
-    for i, req in enumerate(result.scalars().all(), start=1):
-        req.queue_rank = i
-        req.queue_order = i
-
+    requests = list(result.scalars().all())
+    for i, req in enumerate(requests, start=1):
+        req.queue_rank = -i
+        req.queue_order = -i
     await session.flush()
 
-
-async def clear_queue_for_scheduled(
-    session: AsyncSession, scheduled_request_id: int
-) -> None:
-    """Снимает с очереди все accepted-заявки, кроме первой.
-
-    Вызывается при переходе in_progress → scheduled.
-    """
-    result = await session.execute(
-        select(TattooRequest).where(
-            TattooRequest.status == "accepted",
-            TattooRequest.queue_rank.is_not(None),
-            TattooRequest.queue_rank > 1,
-            TattooRequest.is_archived.is_(False),
-            TattooRequest.id != scheduled_request_id,
-        )
-    )
-    for req in result.scalars().all():
-        req.queue_order = None
-        req.queue_rank = None
-        req.updated_at = datetime.now()
+    for i, req in enumerate(requests, start=1):
+        req.queue_rank = i
+        req.queue_order = i
 
     await session.flush()
 

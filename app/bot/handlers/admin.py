@@ -421,7 +421,7 @@ async def handle_complete_request(
     """Завершение сеанса (scheduled → completed)."""
     request_id = int(query.data.split(":")[1])
     try:
-        req = await transition_status(session, request_id, "completed")
+        req = await complete_session(session, request_id)
         await query.message.edit_text(
             f"✨ Заявка #{request_id} завершена!",
             reply_markup=get_admin_main_keyboard(),
@@ -439,7 +439,7 @@ async def handle_cancel_request(
     """Отмена записи (scheduled → cancelled). P0-7: мгновенно."""
     request_id = int(query.data.split(":")[1])
     try:
-        req = await transition_status(session, request_id, "cancelled")
+        req = await cancel_appointment(session, request_id)
         await query.message.edit_text(
             f"🚫 Запись по заявке #{request_id} отменена.",
             reply_markup=get_admin_main_keyboard(),
@@ -581,7 +581,7 @@ async def handle_calendar_select(
 
     # Проверяем, свободен ли слот
     slot = await get_slot_by_date(session, selected_date)
-    if slot and slot.is_blocked:
+    if slot and (slot.is_blocked or await get_booked_dates(session, selected_date, selected_date)):
         await query.answer("Эта дата уже занята ❌")
         return
 

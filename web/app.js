@@ -25,6 +25,25 @@ const STATUS_MAP = {
   cancelled:   { text: 'Отменена',   icon: '🚫', cssClass: 'rejected' },
 };
 
+const PORTFOLIO_WORKS = [
+  { id: 'k01', title: 'Пион', place: 'Бедро', tags: ['color', 'botanical'] },
+  { id: 'k02', title: 'Любовь', place: 'Кожа', tags: ['graphic'] },
+  { id: 'k03', title: 'Ботаника', place: 'Предплечье', tags: ['graphic', 'botanical'] },
+  { id: 'k04', title: 'Фея', place: 'Плечо', tags: ['graphic'] },
+  { id: 'k05', title: 'Птица и лилии', place: 'Спина', tags: ['color', 'botanical'] },
+  { id: 'k06', title: 'Пион и жуки', place: 'Плечо', tags: ['color', 'botanical'] },
+  { id: 'k07', title: 'Осенние цветы', place: 'Рука', tags: ['color', 'botanical'] },
+  { id: 'k08', title: 'Паук и линии', place: 'Грудь', tags: ['graphic'] },
+  { id: 'k09', title: 'Стебли', place: 'Бок', tags: ['graphic', 'botanical'] },
+  { id: 'k10', title: 'Тонкая линия', place: 'Талия', tags: ['graphic'] },
+  { id: 'k11', title: 'Орнаментальный рукав', place: 'Рука', tags: ['black'] },
+  { id: 'k12', title: 'Чёрный рукав', place: 'Рука', tags: ['black'] },
+  { id: 'k13', title: 'Чёрный зверь', place: 'Нога', tags: ['black'] },
+  { id: 'k14', title: 'Пантера', place: 'Бедро', tags: ['black'] },
+  { id: 'k15', title: 'Ветвь', place: 'Рука', tags: ['graphic', 'botanical'] },
+  { id: 'k16', title: 'Леттеринг', place: 'Предплечье', tags: ['graphic'] },
+];
+
 const COLOR_LABELS = { bw: 'Чёрно-белая', color: 'Цветная' };
 const URGENCY_LABELS = { yes: 'Да, срочно', no: 'Нет, обычная очередь' };
 
@@ -58,6 +77,7 @@ const REQUEST_TIMEOUT_MS = 20000;
 // с понятным текстом, чтобы человек не видел ложную ошибку.
 const LOGIN_TIMEOUT_MS = 30000;
 const LOGIN_RETRIES = 3;
+const RESUME_REFRESH_AFTER_MS = 5 * 60 * 1000;
 
 /* ===================================================
    STATE
@@ -78,6 +98,13 @@ const state = {
   calendarSlots: {},
   lastRequestId: null,
   pendingScheduleId: null,
+  sessionRefreshPromise: null,
+  lastVisibleAt: Date.now(),
+  requestIdempotencyKey: null,
+  portfolio: [],
+  portfolioLoaded: false,
+  adminPortfolio: [],
+  editingPortfolioId: null,
 };
 
 function emptyDraft() {
@@ -128,8 +155,8 @@ function initTelegram() {
     try {
       tg.ready();
       tg.expand();
-      tg.setHeaderColor?.('#F8F8FA');
-      tg.setBackgroundColor?.('#F8F8FA');
+      tg.setHeaderColor?.('#07070A');
+      tg.setBackgroundColor?.('#07070A');
       tg.BackButton?.hide?.();
     } catch (e) { /* не критично */ }
   }
@@ -148,31 +175,51 @@ function authHeader() {
 
 async function apiFetch(endpoint, options = {}) {
   const { timeoutMs, ...fetchOptions } = options;
+  const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
   const headers = Object.assign(
-    { 'Content-Type': 'application/json' },
+    isFormData ? {} : { 'Content-Type': 'application/json' },
     authHeader(),
     fetchOptions.headers || {}
   );
 
   let res;
+  let timer;
   try {
     // Таймаут обязателен: на мобильной связи запрос может «висеть» вечно,
     // и человек останется навсегда на экране загрузки.
     const controller = new AbortController();
-    const timer = setTimeout(
+    timer = setTimeout(
       () => controller.abort(),
       timeoutMs || REQUEST_TIMEOUT_MS
     );
-    try {
-      res = await fetch(API_BASE + endpoint, {
-        ...fetchOptions,
-        headers,
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
+    res = await fetch(API_BASE + endpoint, {
+      ...fetchOptions,
+      headers,
+      signal: controller.signal,
+    });
+
+    // The timeout covers body reading too. A server can send headers and then
+    // stall while Telegram's WebView waits forever for res.text().
+    const text = await res.text();
+    clearTimeout(timer);
+
+    let data = null;
+    if (text) {
+      try { data = JSON.parse(text); } catch (e) { data = null; }
     }
+
+    if (!res.ok) {
+      const detail =
+        (data && (typeof data.detail === 'string' ? data.detail : null)) ||
+        (res.status === 401 ? 'Открой приложение из Telegram' : `Ошибка ${res.status}`);
+      return { ok: false, status: res.status, error: detail, data };
+    }
+
+    return { ok: true, status: res.status, error: null, data };
   } catch (err) {
+    // Abort can happen while reading the response body, not only in fetch().
+    // Always clear the timer on every failure path.
+    clearTimeout(timer);
     const timeout = err && err.name === 'AbortError';
     return {
       ok: false,
@@ -181,26 +228,18 @@ async function apiFetch(endpoint, options = {}) {
       data: null,
     };
   }
-
-  let data = null;
-  const text = await res.text();
-  if (text) {
-    try { data = JSON.parse(text); } catch (e) { data = null; }
-  }
-
-  if (!res.ok) {
-    const detail =
-      (data && (typeof data.detail === 'string' ? data.detail : null)) ||
-      (res.status === 401 ? 'Открой приложение из Telegram' : `Ошибка ${res.status}`);
-    return { ok: false, status: res.status, error: detail, data };
-  }
-
-  return { ok: true, status: res.status, error: null, data };
 }
 
 const apiGet = (endpoint) => apiFetch(endpoint, { method: 'GET' });
-const apiPost = (endpoint, body) =>
-  apiFetch(endpoint, { method: 'POST', body: JSON.stringify(body || {}) });
+const apiPost = (endpoint, body, headers = {}) =>
+  apiFetch(endpoint, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+    headers,
+  });
+
+const apiUpload = (endpoint, formData) =>
+  apiFetch(endpoint, { method: 'POST', body: formData });
 
 /* ===================================================
    NAVIGATION
@@ -219,7 +258,84 @@ function showScreen(screenId) {
   const nav = document.getElementById('bottom-nav');
   if (nav) nav.classList.toggle('hidden', hideNav.includes(id));
 
-  updateBottomNav(id === 'screen-my-requests' ? 'screen-my-requests' : id);
+  updateBottomNav(id);
+}
+
+function portfolioImageUrl(work) {
+  return work.image_url || `assets/portfolio/${work.id}.jpg`;
+}
+
+function renderHomePortfolio() {
+  const strip = document.querySelector('.home-work-strip');
+  if (!strip || !state.portfolioLoaded) return;
+  strip.innerHTML = state.portfolio.slice(0, 3).map((work) => `
+    <button onclick="App.openPortfolio()"><img src="${escapeHtml(portfolioImageUrl(work))}" alt="${escapeHtml(work.title)}"><span>${escapeHtml(work.title)}</span></button>`).join('');
+}
+
+function renderPortfolio(filter = 'all') {
+  const grid = document.getElementById('portfolio-grid');
+  if (!grid) return;
+  const source = state.portfolioLoaded ? state.portfolio : PORTFOLIO_WORKS;
+  const works = filter === 'all' ? source : source.filter((work) => (work.tags || []).includes(filter));
+  grid.innerHTML = works.map((work) => `
+    <figure class="portfolio-tile">
+      <img src="${escapeHtml(portfolioImageUrl(work))}" alt="${escapeHtml(work.title)} на теле, ${escapeHtml(work.place)}" loading="lazy">
+      <figcaption><b>${escapeHtml(work.title)}</b><span>${escapeHtml(work.place)}</span></figcaption>
+    </figure>`).join('');
+}
+
+async function loadPortfolio(force = false) {
+  if (state.portfolioLoaded && !force) return;
+  const res = await apiGet('portfolio');
+  if (res.ok && Array.isArray(res.data)) {
+    state.portfolio = res.data;
+    state.portfolioLoaded = true;
+    renderHomePortfolio();
+  }
+}
+
+async function openPortfolio() {
+  const grid = document.getElementById('portfolio-grid');
+  if (grid && !state.portfolioLoaded) grid.innerHTML = '<div class="portfolio-loading">Загружаем работы…</div>';
+  await loadPortfolio();
+  renderPortfolio();
+  showScreen('screen-portfolio');
+}
+
+function requireTelegramAuth() {
+  if (state.ready) return true;
+  toast('Заявки доступны при открытии приложения из Telegram.');
+  return false;
+}
+
+function filterPortfolio(filter, button) {
+  document.querySelectorAll('.portfolio-filters button').forEach((item) => item.classList.toggle('selected', item === button));
+  renderPortfolio(filter);
+}
+
+function closeIntro() {
+  const intro = document.getElementById('intro-overlay');
+  if (!intro) return;
+  intro.classList.add('intro-closing');
+  intro.classList.remove('intro-playing');
+  try { sessionStorage.setItem('tatu.intro.seen', '1'); } catch (e) { /* storage can be unavailable */ }
+  setTimeout(() => {
+    intro.classList.add('hidden');
+    intro.classList.remove('intro-closing');
+  }, 650);
+}
+
+function playIntro() {
+  const intro = document.getElementById('intro-overlay');
+  if (!intro) return;
+  intro.classList.remove('hidden', 'intro-closing', 'intro-playing');
+  void intro.offsetWidth;
+  intro.classList.add('intro-playing');
+  setTimeout(() => intro.classList.contains('hidden') || closeIntro(), 6500);
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 }
 
 function updateBottomNav(activeScreen) {
@@ -243,11 +359,15 @@ async function init() {
   showScreen('screen-loading');
 
   if (!tg || !tg.initData) {
-    // Открыли в обычном браузере: работаем в режиме просмотра.
-    showFatal(
-      'Открой приложение из Telegram',
-      'Показывать и создавать заявки можно только внутри Telegram — тогда сервер знает, кто ты.'
-    );
+    // Public pages remain inspectable in a browser; authenticated actions stay Telegram-only.
+    state.me = { first_name: 'гость', is_admin: false };
+    state.ready = false;
+    document.getElementById('home-master-block')?.classList.add('hidden');
+    document.getElementById('home-last-request')?.classList.add('hidden');
+    showScreen('screen-home');
+    document.getElementById('home-subtitle').textContent =
+      'Тонкая графика, ботаника, цвет и тяжёлый чёрный. Эскиз соберём вместе, под тебя и твою идею.';
+    loadPortfolio().catch(() => {});
     return;
   }
 
@@ -277,6 +397,35 @@ async function init() {
   await goHome();
 }
 
+async function refreshSessionOnResume() {
+  if (!tg?.initData || !state.ready || state.sessionRefreshPromise) return;
+
+  state.sessionRefreshPromise = (async () => {
+    // Re-read Telegram's current object. Telegram can refresh initData when the
+    // WebView is resumed; authHeader() intentionally reads tg.initData live.
+    initTelegram();
+    const res = await loginWithRetry({ silent: true });
+    if (res.ok) {
+      state.me = res.data;
+      state.ready = true;
+      return;
+    }
+
+    if (res.status === 401 || res.status === 403) {
+      state.ready = false;
+      toast('Сессия Telegram устарела. Закрой и снова открой приложение из бота.', 5000);
+      return;
+    }
+
+    // Keep the already-rendered app usable during a temporary backend outage.
+    toast('Сервер временно недоступен. Попробуй действие ещё раз.', 4000);
+  })().finally(() => {
+    state.sessionRefreshPromise = null;
+  });
+
+  await state.sessionRefreshPromise;
+}
+
 /** Меняет подпись под спиннером (например, «сервер просыпается»). */
 function setLoadingText(text) {
   const el = document.getElementById('loading-text');
@@ -291,21 +440,25 @@ function setLoadingText(text) {
  * человека и не повод показывать «Не удалось войти». Повторяем несколько
  * раз и честно пишем, что сервер просыпается.
  */
-async function loginWithRetry() {
+async function loginWithRetry({ silent = false } = {}) {
   let last = null;
 
   for (let attempt = 1; attempt <= LOGIN_RETRIES; attempt++) {
     const res = await apiFetch('me', { method: 'GET', timeoutMs: LOGIN_TIMEOUT_MS });
 
-    // Успех или осмысленный отказ сервера (401 и т.п.) — повторять нечего.
-    if (res.ok || (res.status && res.status !== 0)) {
+    // Retry only transport failures and temporary gateway/service responses.
+    // Never repeat an expired/invalid Telegram authorization.
+    const retryable = res.status === 0 || [502, 503, 504].includes(res.status);
+    if (res.ok || (res.status && !retryable)) {
       return res;
     }
 
     last = res;
-    if (attempt < LOGIN_RETRIES) {
-      setLoadingText('Сервер просыпается, подожди немного…');
+    if (attempt < LOGIN_RETRIES && retryable) {
+      if (!silent) setLoadingText('Сервер просыпается, подожди немного…');
       await sleep(1500 * attempt);
+    } else if (!retryable) {
+      return res;
     }
   }
 
@@ -328,10 +481,10 @@ async function goHome() {
   haptic('light');
   showScreen('screen-home');
 
-  const name = state.me?.first_name || 'Клиент';
-  document.getElementById('greeting-text').textContent = `✨ Привет, ${name}!`;
   document.getElementById('home-subtitle').textContent =
-    'Здесь можно оставить заявку на эскиз и следить за её статусом.';
+    'Тонкая графика, ботаника, цвет и тяжёлый чёрный. Эскиз соберём вместе, под тебя и твою идею.';
+
+  loadPortfolio().then(() => renderPortfolio()).catch(() => {});
 
   if (!state.settings) {
     const s = await apiGet('settings');
@@ -379,8 +532,10 @@ function applyUrgentPrice() {
    =================================================== */
 
 function startNewRequest() {
+  if (!requireTelegramAuth()) return;
   haptic('light');
   state.draft = emptyDraft();
+  state.requestIdempotencyKey = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
   state.currentStep = 1;
   resetFormFields();
   applyUrgentPrice();
@@ -407,6 +562,7 @@ function hasDraftContent() {
  * Если форма заполнена — спрашиваем подтверждение.
  */
 function navNewRequest() {
+  if (!requireTelegramAuth()) return;
   if (hasDraftContent() && !confirm('Начать новую заявку? Введённое не сохранится.')) {
     return;
   }
@@ -762,7 +918,9 @@ async function submitRequest() {
     brief_answers: Object.keys(brief).length ? brief : null,
   };
 
-  const res = await apiPost('requests', payload);
+  const res = await apiPost('requests', payload, {
+    'Idempotency-Key': state.requestIdempotencyKey,
+  });
 
   submitting = false;
   btn.textContent = original;
@@ -777,6 +935,7 @@ async function submitRequest() {
   document.getElementById('success-request-id').textContent = `Заявка #${res.data.id} отправлена!`;
   showScreen('screen-success');
   state.draft = null;
+  state.requestIdempotencyKey = null;
 }
 
 /* ===================================================
@@ -784,6 +943,7 @@ async function submitRequest() {
    =================================================== */
 
 async function openMyRequests() {
+  if (!requireTelegramAuth()) return;
   haptic('light');
   showScreen('screen-my-requests');
 
@@ -917,6 +1077,7 @@ async function openRequestDetail(requestId) {
    =================================================== */
 
 function openCalendar() {
+  if (!requireTelegramAuth()) return;
   haptic('light');
   showScreen('screen-calendar');
   renderCalendar();
@@ -1075,6 +1236,7 @@ async function loadCalendarSlots() {
    =================================================== */
 
 async function openMasterCabinet() {
+  if (!requireTelegramAuth()) return;
   haptic('light');
 
   if (!state.me?.is_admin) {
@@ -1094,9 +1256,10 @@ async function openMasterCabinet() {
   list.innerHTML = '';
   stats.innerHTML = '';
 
-  const [dash, reqs] = await Promise.all([
+  const [dash, reqs, portfolio] = await Promise.all([
     apiGet('admin/dashboard'),
     apiGet('requests?limit=50'),
+    apiGet('admin/portfolio'),
   ]);
 
   loading.classList.add('hidden');
@@ -1119,12 +1282,124 @@ async function openMasterCabinet() {
 
   state.masterRequests = Array.isArray(reqs.data) ? reqs.data : [];
 
+  if (portfolio.ok && Array.isArray(portfolio.data)) {
+    state.adminPortfolio = portfolio.data;
+    renderAdminPortfolio();
+  }
+
   if (state.masterRequests.length === 0) {
     empty.classList.remove('hidden');
     return;
   }
 
   renderMasterList();
+}
+
+function resetPortfolioForm() {
+  state.editingPortfolioId = null;
+  document.getElementById('portfolio-form-title').textContent = 'Добавить работу';
+  document.getElementById('portfolio-title').value = '';
+  document.getElementById('portfolio-place').value = '';
+  document.getElementById('portfolio-tags').value = '';
+  document.getElementById('portfolio-image-url').value = '';
+  document.getElementById('portfolio-sort').value = '0';
+  document.getElementById('portfolio-published').checked = true;
+  document.getElementById('portfolio-image').value = '';
+  document.getElementById('portfolio-form').classList.add('hidden');
+}
+
+function editPortfolioItem(item) {
+  state.editingPortfolioId = item.id;
+  document.getElementById('portfolio-form-title').textContent = 'Изменить работу';
+  document.getElementById('portfolio-title').value = item.title || '';
+  document.getElementById('portfolio-place').value = item.place || '';
+  document.getElementById('portfolio-tags').value = (item.tags || []).join(', ');
+  document.getElementById('portfolio-image-url').value = item.image_url || '';
+  document.getElementById('portfolio-sort').value = item.sort_order ?? 0;
+  document.getElementById('portfolio-published').checked = Boolean(item.is_published);
+  document.getElementById('portfolio-image').value = '';
+  document.getElementById('portfolio-form').classList.remove('hidden');
+}
+
+async function savePortfolioItem(event) {
+  event.preventDefault();
+  const payload = {
+    title: document.getElementById('portfolio-title').value.trim(),
+    place: document.getElementById('portfolio-place').value.trim(),
+    tags: document.getElementById('portfolio-tags').value.split(',').map((tag) => tag.trim()).filter(Boolean),
+    image_url: document.getElementById('portfolio-image-url').value.trim() || null,
+    sort_order: Number(document.getElementById('portfolio-sort').value || 0),
+    is_published: document.getElementById('portfolio-published').checked,
+  };
+  const editing = state.editingPortfolioId;
+  const res = editing
+    ? await apiFetch(`admin/portfolio/${editing}`, { method: 'PATCH', body: JSON.stringify(payload) })
+    : await apiPost('admin/portfolio', payload);
+  if (!res.ok) {
+    tgAlert(res.error || 'Не удалось сохранить работу');
+    return;
+  }
+  const file = document.getElementById('portfolio-image').files[0];
+  if (file) {
+    const form = new FormData();
+    form.append('image', file);
+    const upload = await apiUpload(`admin/portfolio/${res.data.id}/image`, form);
+    if (!upload.ok) {
+      tgAlert(upload.error || 'Работа сохранена, но изображение не загрузилось');
+    }
+  }
+  toast(editing ? 'Работа обновлена' : 'Работа добавлена');
+  document.getElementById('portfolio-form').classList.add('hidden');
+  await loadAdminPortfolio();
+  await loadPortfolio(true);
+  renderPortfolio();
+}
+
+async function loadAdminPortfolio() {
+  const res = await apiGet('admin/portfolio');
+  if (!res.ok) {
+    tgAlert(res.error || 'Не удалось загрузить портфолио');
+    return;
+  }
+  state.adminPortfolio = Array.isArray(res.data) ? res.data : [];
+  renderAdminPortfolio();
+}
+
+function renderAdminPortfolio() {
+  const list = document.getElementById('admin-portfolio-list');
+  if (!list) return;
+  list.innerHTML = state.adminPortfolio.map((item) => `
+    <div class="admin-portfolio-row">
+      <img src="${escapeHtml(portfolioImageUrl(item))}" alt="">
+      <div class="admin-portfolio-copy"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.place)} · ${escapeHtml((item.tags || []).join(', '))}</span><small>${item.is_published ? 'Опубликована' : 'Скрыта'}${item.has_uploaded_image ? ' · файл в БД' : ''}</small></div>
+      <div class="admin-portfolio-actions"><button class="btn btn-secondary" data-portfolio-edit="${item.id}">Изменить</button><button class="btn btn-secondary" data-portfolio-toggle="${item.id}">${item.is_published ? 'Скрыть' : 'Опубликовать'}</button><button class="btn btn-danger" data-portfolio-delete="${item.id}">Удалить</button></div>
+    </div>`).join('');
+  list.querySelectorAll('[data-portfolio-edit]').forEach((button) => button.addEventListener('click', () => {
+    const item = state.adminPortfolio.find((entry) => entry.id === Number(button.dataset.portfolioEdit));
+    if (item) editPortfolioItem(item);
+  }));
+  list.querySelectorAll('[data-portfolio-toggle]').forEach((button) => button.addEventListener('click', () => togglePortfolioItem(Number(button.dataset.portfolioToggle))));
+  list.querySelectorAll('[data-portfolio-delete]').forEach((button) => button.addEventListener('click', () => deletePortfolioItem(Number(button.dataset.portfolioDelete))));
+}
+
+async function togglePortfolioItem(id) {
+  const item = state.adminPortfolio.find((entry) => entry.id === id);
+  if (!item) return;
+  const res = await apiFetch(`admin/portfolio/${id}`, { method: 'PATCH', body: JSON.stringify({ is_published: !item.is_published }) });
+  if (!res.ok) { tgAlert(res.error || 'Не удалось изменить публикацию'); return; }
+  await loadAdminPortfolio();
+  await loadPortfolio(true);
+  renderPortfolio();
+}
+
+async function deletePortfolioItem(id) {
+  if (!confirm('Удалить эту работу?')) return;
+  const res = await apiFetch(`admin/portfolio/${id}`, { method: 'DELETE' });
+  if (!res.ok) { tgAlert(res.error || 'Не удалось удалить работу'); return; }
+  toast('Работа удалена');
+  await loadAdminPortfolio();
+  await loadPortfolio(true);
+  renderPortfolio();
 }
 
 /** Строка «кто клиент» для карточки мастера. */
@@ -1288,6 +1563,7 @@ function closeModal(id) {
 }
 
 function openMasterContact() {
+  if (!requireTelegramAuth()) return;
   haptic('light');
   if (tg?.openTelegramLink) {
     tg.openTelegramLink(MASTER_TELEGRAM);
@@ -1396,11 +1672,17 @@ const App = {
   explainCalendarDay,
   applyUrgentPrice,
   openMasterCabinet,
+  resetPortfolioForm,
+  savePortfolioItem,
   openLastRequest,
   openMasterContact,
   openModal,
   closeModal,
   confirmScheduleDate,
+  openPortfolio,
+  filterPortfolio,
+  playIntro,
+  closeIntro,
 };
 
 window.App = App;
@@ -1411,5 +1693,26 @@ window.App = App;
 
 document.addEventListener('DOMContentLoaded', () => {
   initFormControls();
+  renderPortfolio();
+  try {
+    if (!sessionStorage.getItem('tatu.intro.seen')) setTimeout(playIntro, 180);
+  } catch (e) { /* intro remains available from the quiet home link */ }
   init();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    state.lastVisibleAt = Date.now();
+    return;
+  }
+
+  if (Date.now() - state.lastVisibleAt >= RESUME_REFRESH_AFTER_MS) {
+    refreshSessionOnResume();
+  }
+});
+
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted || Date.now() - state.lastVisibleAt >= RESUME_REFRESH_AFTER_MS) {
+    refreshSessionOnResume();
+  }
 });
