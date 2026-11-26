@@ -941,6 +941,23 @@ function renderReviewCard() {
 function showEditOptions() {
   haptic('light');
 
+  const d = state.draft || emptyDraft();
+  const summaries = {
+    1: d.description ? `Идея: ${d.description.slice(0, 48)}${d.description.length > 48 ? '…' : ''}` : 'Описание татуировки',
+    2: d.references?.length ? `${d.references.length} ${d.references.length === 1 ? 'изображение' : 'изображения'}` : 'Без изображений',
+    3: d.location || 'Место на теле',
+    4: d.size || 'Размер татуировки',
+    5: COLOR_LABELS[d.colorMode] || 'Цветовой вариант',
+    6: URGENCY_LABELS[d.isUrgent] || 'Сроки и срочность',
+    7: [
+      BRIEF_VALUES.experience_level[d.brief?.experience_level],
+      BRIEF_VALUES.preferred_style[d.brief?.preferred_style] || d.brief?.otherStyle,
+      BRIEF_VALUES.inspiration_source[d.brief?.inspiration_source],
+      BRIEF_VALUES.importance[d.brief?.importance],
+    ].filter(Boolean).join(' · ') || 'Дополнительные пожелания',
+    8: 'Посмотреть заявку целиком',
+  };
+
   const overlay = document.createElement('div');
   overlay.className = 'edit-options-overlay';
   overlay.innerHTML = `
@@ -950,7 +967,7 @@ function showEditOptions() {
        ${Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1)
         .map(
           (i) => `<button class="edit-option-btn" data-step="${i}">
-            <span class="step-num">${i}</span><span>${FORM_STEP_NAMES[i]}</span></button>`
+            <span class="step-num">${i}</span><span class="edit-option-copy"><b>${FORM_STEP_NAMES[i]}</b><small>${escapeHtml(summaries[i])}</small></span><span aria-hidden="true">›</span></button>`
         )
         .join('')}
     </div>`;

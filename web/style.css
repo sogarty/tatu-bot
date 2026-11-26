@@ -1544,6 +1544,27 @@ body {
   text-align: left;
 }
 
+.edit-option-copy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+}
+
+.edit-option-copy b {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.edit-option-copy small {
+  overflow: hidden;
+  color: var(--neutral);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .edit-option-btn:active {
   background: var(--accent-light);
 }
@@ -1562,7 +1583,7 @@ body {
 }
 
 .edit-option-btn span:last-child {
-  color: #f0eae2;
+  color: var(--neutral);
   font-weight: 600;
 }
 
