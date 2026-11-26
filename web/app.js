@@ -976,6 +976,10 @@ let submitting = false;
 
 async function submitRequest() {
   if (submitting) return;
+  const isResuming = Boolean(state.referenceUploadRequestId);
+  if (!isResuming && !state.requestIdempotencyKey) {
+    state.requestIdempotencyKey = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  }
 
   // Финальная проверка всех обязательных шагов
   const saved = state.currentStep;
@@ -1021,9 +1025,16 @@ async function submitRequest() {
     brief_answers: Object.keys(brief).length ? brief : null,
   };
 
-  const res = await apiPost('requests', payload, {
-    'Idempotency-Key': state.requestIdempotencyKey,
-  });
+  let res;
+  try {
+    res = isResuming
+      ? { ok: true, data: { id: state.referenceUploadRequestId } }
+      : await apiPost('requests', payload, {
+        'Idempotency-Key': state.requestIdempotencyKey,
+      });
+  } catch (error) {
+    res = { ok: false, error: 'Сервер временно недоступен. Попробуй ещё раз.' };
+  }
 
   if (!res.ok) {
     submitting = false;
@@ -1043,7 +1054,12 @@ async function submitRequest() {
     const file = state.referenceFiles[index];
     const form = new FormData();
     form.append('image', file);
-    const upload = await apiUpload(`requests/${res.data.id}/references`, form);
+    let upload;
+    try {
+      upload = await apiUpload(`requests/${res.data.id}/references`, form);
+    } catch (error) {
+      upload = { ok: false };
+    }
     if (!upload.ok) {
       state.uploadedReferenceCount = index;
       submitting = false;
