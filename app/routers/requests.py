@@ -8,15 +8,17 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import date as date_type, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, undefer
 
 from app.auth import (
     admin_only,
@@ -41,6 +43,7 @@ from app.models import (
     Appointment,
     BotSettings,
     MasterSlot,
+    RequestReference,
     TattooRequest,
     TgUser,
 )
@@ -55,6 +58,18 @@ from app.utils.state_machine import get_transition_description, is_valid_transit
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["requests"])
+
+MAX_REFERENCE_BYTES = 8 * 1024 * 1024
+MAX_REFERENCES_PER_REQUEST = 5
+ALLOWED_REFERENCE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+def _reference_signature_matches(content_type: str, content: bytes) -> bool:
+    return {
+        "image/jpeg": content.startswith(b"\xff\xd8\xff"),
+        "image/png": content.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/webp": content.startswith(b"RIFF") and content[8:12] == b"WEBP",
+    }.get(content_type, False)
 
 # Связи, нужные для сериализации TattooRequestOut.
 # Вложенный appointment.slot загружается тоже: иначе property slot_date
@@ -364,6 +379,89 @@ async def get_request(
     """Детальная информация по заявке."""
     return req
 
+
+@router.get(
+    "/requests/{request_id}/references/{reference_id}/image",
+    response_class=Response,
+)
+async def get_request_reference_image(
+    request_id: int,
+    reference_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return an uploaded reference only to its client or to the master."""
+    await load_request_for_user(request_id, session, current_user)
+    reference = (
+        await session.execute(
+            select(RequestReference)
+            .where(
+                RequestReference.id == reference_id,
+                RequestReference.request_id == request_id,
+            )
+            .options(undefer(RequestReference.image_data))
+        )
+    ).scalar_one_or_none()
+    if (
+        reference is None
+        or not reference.has_uploaded_image
+        or reference.image_data is None
+    ):
+        raise HTTPException(status_code=404, detail="Референс не найден")
+    return Response(
+        content=reference.image_data,
+        media_type=reference.image_content_type or "image/jpeg",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/requests/{request_id}/references", response_model=TattooRequestOut)
+async def upload_request_reference(
+    request_id: int,
+    image: UploadFile = File(...),
+    session: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Attach a client reference to a request, keeping it in PostgreSQL."""
+    await load_request_for_user(request_id, session, current_user)
+    req = await _load_locked(session, request_id)
+    if current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Референсы добавляет клиент")
+    if req.user_id != current_user["user_id"]:
+        raise RequestNotFoundError()
+    if req.status not in {"draft", "new"}:
+        raise HTTPException(
+            status_code=409,
+            detail="К этой заявке уже нельзя добавить файл",
+        )
+    if len(req.references) >= MAX_REFERENCES_PER_REQUEST:
+        raise HTTPException(
+            status_code=400,
+            detail="Можно прикрепить не больше 5 изображений",
+        )
+    if image.content_type not in ALLOWED_REFERENCE_TYPES:
+        raise HTTPException(status_code=415, detail="Поддерживаются JPEG, PNG и WebP")
+
+    content = await image.read(MAX_REFERENCE_BYTES + 1)
+    if len(content) > MAX_REFERENCE_BYTES:
+        raise HTTPException(status_code=413, detail="Изображение слишком большое")
+    if not content or not _reference_signature_matches(image.content_type, content):
+        raise HTTPException(
+            status_code=415,
+            detail="Файл не похож на изображение заявленного формата",
+        )
+
+    reference = RequestReference(
+        request_id=req.id,
+        order_index=len(req.references),
+        file_id=f"miniapp:{uuid.uuid4()}",
+        image_data=content,
+        image_content_type=image.content_type,
+        has_uploaded_image=True,
+    )
+    session.add(reference)
+    await session.commit()
+    return await _load_locked(session, request_id)
 
 # ─── PATCH /api/v1/requests/{id} — обновление черновика ─────────────────────
 

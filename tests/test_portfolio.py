@@ -57,6 +57,7 @@ def test_public_portfolio_hides_unpublished_and_crud_persists():
 
             public = await list_public_portfolio(session)
             assert [item.id for item in public] == [created.id]
+            assert "image_data" not in public[0].__dict__
 
             updated = await update_portfolio_item(
                 created.id,

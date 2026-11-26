@@ -59,6 +59,8 @@ class RequestReferenceOut(RequestReferenceBase):
 
     id: int
     created_at: datetime
+    image_content_type: str | None = None
+    has_uploaded_image: bool = False
 
 
 # ─── Brief Question ──────────────────────────────────────────────────────────
@@ -227,8 +229,8 @@ class TattooRequestOut(BaseModel):
     updated_at: datetime
     is_archived: bool
     idempotency_key: str | None = None
-    references: list[RequestReferenceOut] = []
-    brief_questions: list[BriefQuestionOut] = []
+    references: list[RequestReferenceOut] = Field(default_factory=list)
+    brief_questions: list[BriefQuestionOut] = Field(default_factory=list)
     appointment: AppointmentOut | None = None
 
 

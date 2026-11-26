@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from app.auth import admin_only
 from app.database import get_db
@@ -40,15 +41,21 @@ def _public_query():
 
 
 def _admin_query():
-    return select(PortfolioItem).order_by(
-        PortfolioItem.sort_order.asc(), PortfolioItem.id.asc()
+    return (
+        select(PortfolioItem)
+        .options(undefer(PortfolioItem.image_data))
+        .order_by(PortfolioItem.sort_order.asc(), PortfolioItem.id.asc())
     )
 
 
 def _admin_out(item: PortfolioItem) -> PortfolioItemAdminOut:
+    image_loaded = "image_data" in item.__dict__
     return PortfolioItemAdminOut(
         **PortfolioItemOut.model_validate(item).model_dump(),
-        has_uploaded_image=item.image_data is not None,
+        has_uploaded_image=bool(
+            item.image_content_type
+            or (image_loaded and item.__dict__.get("image_data") is not None)
+        ),
         image_content_type=item.image_content_type,
     )
 
@@ -61,10 +68,20 @@ async def list_public_portfolio(session: AsyncSession = Depends(get_db)):
 
 @router.get("/portfolio/{item_id}/image")
 async def get_portfolio_image(item_id: int, session: AsyncSession = Depends(get_db)):
-    item = await session.get(PortfolioItem, item_id)
+    item = (
+        await session.execute(
+            select(PortfolioItem)
+            .where(PortfolioItem.id == item_id)
+            .options(undefer(PortfolioItem.image_data))
+        )
+    ).scalar_one_or_none()
     if item is None or not item.is_published or item.image_data is None:
         raise HTTPException(status_code=404, detail="Изображение не найдено")
-    return Response(content=item.image_data, media_type=item.image_content_type or "image/jpeg")
+    return Response(
+        content=item.image_data,
+        media_type=item.image_content_type or "image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get("/admin/portfolio", response_model=list[PortfolioItemAdminOut])

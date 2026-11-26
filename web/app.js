@@ -67,7 +67,18 @@ const BRIEF_VALUES = {
   importance: { aesthetics: 'Эстетика', meaning: 'Смысл', safety: 'Безопасность' },
 };
 
-const TOTAL_STEPS = 7;
+const TOTAL_STEPS = 8;
+
+const FORM_STEP_NAMES = {
+  1: 'Идея',
+  2: 'Референсы',
+  3: 'Место на теле',
+  4: 'Размер',
+  5: 'Цвет',
+  6: 'Срочность',
+  7: 'Вопросы для эскиза',
+  8: 'Проверка заявки',
+};
 
 // Сколько ждём ответ сервера. Дольше держать человека на спиннере нельзя.
 const REQUEST_TIMEOUT_MS = 20000;
@@ -105,6 +116,9 @@ const state = {
   portfolioLoaded: false,
   adminPortfolio: [],
   editingPortfolioId: null,
+  referenceFiles: [],
+  referenceObjectUrls: new Map(),
+  portfolioObjectUrls: new Map(),
 };
 
 function emptyDraft() {
@@ -122,6 +136,7 @@ function emptyDraft() {
       inspiration_source: '',
       importance: '',
     },
+    references: [],
   };
 }
 
@@ -261,6 +276,12 @@ function showScreen(screenId) {
   updateBottomNav(id);
 }
 
+function updateClientOnlyControls() {
+  document.querySelectorAll('[data-client-only]').forEach((element) => {
+    element.classList.toggle('hidden', Boolean(state.me?.is_admin));
+  });
+}
+
 function portfolioImageUrl(work) {
   return work.image_url || `assets/portfolio/${work.id}.jpg`;
 }
@@ -278,10 +299,16 @@ function renderPortfolio(filter = 'all') {
   const source = state.portfolioLoaded ? state.portfolio : PORTFOLIO_WORKS;
   const works = filter === 'all' ? source : source.filter((work) => (work.tags || []).includes(filter));
   grid.innerHTML = works.map((work) => `
-    <figure class="portfolio-tile">
+    <button class="portfolio-tile" data-portfolio-preview="${escapeHtml(String(work.id))}" aria-label="Открыть ${escapeHtml(work.title)}">
       <img src="${escapeHtml(portfolioImageUrl(work))}" alt="${escapeHtml(work.title)} на теле, ${escapeHtml(work.place)}" loading="lazy">
       <figcaption><b>${escapeHtml(work.title)}</b><span>${escapeHtml(work.place)}</span></figcaption>
-    </figure>`).join('');
+    </button>`).join('');
+  grid.querySelectorAll('[data-portfolio-preview]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const work = source.find((item) => String(item.id) === button.dataset.portfolioPreview);
+      if (work) openImagePreview(portfolioImageUrl(work), work.title);
+    });
+  });
 }
 
 async function loadPortfolio(force = false) {
@@ -300,6 +327,16 @@ async function openPortfolio() {
   await loadPortfolio();
   renderPortfolio();
   showScreen('screen-portfolio');
+}
+
+function openImagePreview(src, caption = '') {
+  const image = document.getElementById('image-preview');
+  const label = document.getElementById('image-preview-caption');
+  if (!image) return;
+  image.src = src;
+  image.alt = caption;
+  if (label) label.textContent = caption;
+  openModal('modal-image-preview');
 }
 
 function requireTelegramAuth() {
@@ -364,6 +401,7 @@ async function init() {
     state.ready = false;
     document.getElementById('home-master-block')?.classList.add('hidden');
     document.getElementById('home-last-request')?.classList.add('hidden');
+    updateClientOnlyControls();
     showScreen('screen-home');
     document.getElementById('home-subtitle').textContent =
       'Тонкая графика, ботаника, цвет и тяжёлый чёрный. Эскиз соберём вместе, под тебя и твою идею.';
@@ -393,8 +431,10 @@ async function init() {
   // Показываем вход в кабинет только мастеру
   const masterBlock = document.getElementById('home-master-block');
   if (masterBlock) masterBlock.style.display = state.me.is_admin ? '' : 'none';
+  updateClientOnlyControls();
 
   await goHome();
+  if (state.me.is_admin) openMasterCabinet();
 }
 
 async function refreshSessionOnResume() {
@@ -576,6 +616,11 @@ function resetFormFields() {
   document.getElementById('field-location').value = '';
   document.getElementById('field-size').value = '';
   document.getElementById('field-brief-other').value = '';
+  state.referenceFiles = [];
+  state.draft.references = [];
+  state.referenceObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+  state.referenceObjectUrls.clear();
+  renderReferencePreviews();
   document.getElementById('brief-other-field').classList.add('hidden');
 
   document
@@ -601,7 +646,7 @@ function cancelRequestForm() {
 function renderStep() {
   const step = state.currentStep;
 
-  document.getElementById('step-label').textContent = `Шаг ${step} из ${TOTAL_STEPS}`;
+  document.getElementById('step-label').textContent = `${FORM_STEP_NAMES[step]} · ${step}/${TOTAL_STEPS}`;
   document.getElementById('progress-fill').style.width = `${(step / TOTAL_STEPS) * 100}%`;
 
   document.querySelectorAll('.form-step').forEach((s) => s.classList.remove('active'));
@@ -657,7 +702,7 @@ function validateCurrentStep() {
     state.draft.description = desc;
   }
 
-  if (step === 2) {
+  if (step === 3) {
     const loc = document.getElementById('field-location').value.trim();
     if (loc.length < 3) {
       showError('location', 'Укажи место — минимум 3 символа');
@@ -667,7 +712,7 @@ function validateCurrentStep() {
     state.draft.location = loc;
   }
 
-  if (step === 3) {
+  if (step === 4) {
     const size = document.getElementById('field-size').value.trim();
     if (!size) {
       showError('size', 'Укажи размер татуировки');
@@ -677,12 +722,12 @@ function validateCurrentStep() {
     state.draft.size = size;
   }
 
-  if (step === 4 && !state.draft.colorMode) {
+  if (step === 5 && !state.draft.colorMode) {
     showError('color', 'Выбери цветовой вариант');
     return false;
   }
 
-  if (step === 5 && !state.draft.isUrgent) {
+  if (step === 6 && !state.draft.isUrgent) {
     showError('urgency', 'Выбери вариант срочности');
     return false;
   }
@@ -714,6 +759,11 @@ function initFormControls() {
   const desc = document.getElementById('field-description');
   desc?.addEventListener('input', () => {
     document.getElementById('desc-count').textContent = desc.value.length;
+  });
+
+  document.getElementById('field-references')?.addEventListener('change', (event) => {
+    addReferenceFiles(Array.from(event.target.files || []));
+    event.target.value = '';
   });
 
   // Быстрые кнопки места/размера
@@ -788,6 +838,47 @@ function initFormControls() {
   });
 }
 
+function addReferenceFiles(files) {
+  const available = 5 - state.referenceFiles.length;
+  const selected = files.slice(0, available);
+  if (files.length > available) toast('Можно прикрепить не больше 5 изображений');
+  selected.forEach((file) => {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      toast('Поддерживаются JPEG, PNG и WebP');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast('Каждое изображение должно быть не больше 8 МБ');
+      return;
+    }
+    state.referenceFiles.push(file);
+  });
+  state.draft.references = state.referenceFiles;
+  renderReferencePreviews();
+}
+
+function removeReference(index) {
+  const [file] = state.referenceFiles.splice(index, 1);
+  const url = state.referenceObjectUrls.get(file);
+  if (url) URL.revokeObjectURL(url);
+  state.referenceObjectUrls.delete(file);
+  state.draft.references = state.referenceFiles;
+  renderReferencePreviews();
+}
+
+function renderReferencePreviews() {
+  const grid = document.getElementById('references-grid');
+  if (!grid) return;
+  grid.innerHTML = state.referenceFiles.map((file, index) => {
+    let url = state.referenceObjectUrls.get(file);
+    if (!url) {
+      url = URL.createObjectURL(file);
+      state.referenceObjectUrls.set(file, url);
+    }
+    return `<div class="reference-thumb"><img src="${escapeHtml(url)}" alt="Референс ${index + 1}"><button type="button" class="remove-ref" onclick="App.removeReference(${index})" aria-label="Удалить референс">×</button></div>`;
+  }).join('');
+}
+
 /* ===================================================
    REVIEW
    =================================================== */
@@ -800,6 +891,13 @@ function renderReviewCard() {
   document.getElementById('review-size').textContent = d.size || '—';
   document.getElementById('review-color').textContent = COLOR_LABELS[d.colorMode] || '—';
   document.getElementById('review-urgency').textContent = URGENCY_LABELS[d.isUrgent] || '—';
+  const referenceReview = document.getElementById('review-references');
+  referenceReview.innerHTML = d.references?.length
+    ? d.references.map((file, index) => {
+      const url = state.referenceObjectUrls.get(file);
+      return `<img src="${escapeHtml(url || '')}" alt="Референс ${index + 1}">`;
+    }).join('')
+    : '<span class="review-empty">Без референсов</span>';
 
   const brief = d.brief;
 
@@ -843,11 +941,11 @@ function showEditOptions() {
   overlay.innerHTML = `
     <div class="edit-options-backdrop"></div>
     <div class="edit-options-panel">
-      <h3>Изменить шаг</h3>
-      ${Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1)
+       <h3>Что хочешь поправить?</h3>
+       ${Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1)
         .map(
           (i) => `<button class="edit-option-btn" data-step="${i}">
-            <span class="step-num">${i}</span><span>Шаг ${i}</span></button>`
+            <span class="step-num">${i}</span><span>${FORM_STEP_NAMES[i]}</span></button>`
         )
         .join('')}
     </div>`;
@@ -876,7 +974,7 @@ async function submitRequest() {
 
   // Финальная проверка всех обязательных шагов
   const saved = state.currentStep;
-  for (const step of [1, 2, 3, 4, 5]) {
+  for (const step of [1, 3, 4, 5, 6]) {
     state.currentStep = step;
     if (!validateCurrentStep()) {
       state.currentStep = step;
@@ -929,6 +1027,16 @@ async function submitRequest() {
   if (!res.ok) {
     tgAlert('Не удалось отправить заявку: ' + (res.error || 'ошибка'));
     return;
+  }
+
+  for (const file of state.referenceFiles) {
+    const form = new FormData();
+    form.append('image', file);
+    const upload = await apiUpload(`requests/${res.data.id}/references`, form);
+    if (!upload.ok) {
+      tgAlert(upload.error || 'Заявка создана, но один из референсов не загрузился');
+      break;
+    }
   }
 
   launchConfetti();
@@ -1028,6 +1136,21 @@ async function openRequestDetail(requestId) {
   document.getElementById('detail-urgency').textContent = req.is_urgent ? '⚡ Да' : 'Нет';
   document.getElementById('detail-description').textContent = req.description || '—';
 
+  const referencesSection = document.getElementById('detail-references-section');
+  const referencesContainer = document.getElementById('detail-references');
+  const references = Array.isArray(req.references) ? req.references : [];
+  updateClientOnlyControls();
+  if (references.length && referencesContainer) {
+    referencesSection.classList.remove('hidden');
+    referencesContainer.innerHTML = references.map((reference, index) => `
+      <button class="detail-reference-button" type="button" onclick="App.openRequestReference(${req.id}, ${reference.id}, 'Референс ${index + 1}')">
+        <span class="detail-reference-placeholder">Референс ${index + 1}</span>
+      </button>`).join('');
+    loadReferenceThumbs(req.id, references);
+  } else if (referencesSection) {
+    referencesSection.classList.add('hidden');
+  }
+
   // Дата сеанса (появляется только когда назначена)
   const dateRow = document.getElementById('detail-date-row');
   const appt = req.appointment;
@@ -1070,6 +1193,36 @@ async function openRequestDetail(requestId) {
   }
 
   openModal('modal-request-detail');
+}
+
+async function openRequestReference(requestId, referenceId, caption) {
+  const response = await fetch(`${API_BASE}requests/${requestId}/references/${referenceId}/image`, {
+    headers: authHeader(),
+  });
+  if (!response.ok) {
+    toast('Не удалось открыть референс');
+    return;
+  }
+  const url = URL.createObjectURL(await response.blob());
+  state.referenceObjectUrls.set(`server:${requestId}:${referenceId}`, url);
+  openImagePreview(url, caption);
+}
+
+async function loadReferenceThumbs(requestId, references) {
+  const buttons = document.querySelectorAll('#detail-references .detail-reference-button');
+  await Promise.all(references.map(async (reference, index) => {
+    if (!reference.has_uploaded_image || !buttons[index]) return;
+    const response = await fetch(`${API_BASE}requests/${requestId}/references/${reference.id}/image`, {
+      headers: authHeader(),
+    });
+    if (!response.ok) return;
+    const url = URL.createObjectURL(await response.blob());
+    state.referenceObjectUrls.set(`server:${requestId}:${reference.id}`, url);
+    const image = document.createElement('img');
+    image.src = url;
+    image.alt = `Референс ${index + 1}`;
+    buttons[index].replaceChildren(image);
+  }));
 }
 
 /* ===================================================
@@ -1144,17 +1297,22 @@ function renderCalendar() {
     cell.textContent = day;
 
     const dateStr = isoDate(year, month, day);
+    cell.dataset.date = dateStr;
     if (dateStr === todayStr) cell.classList.add('today');
 
     const slot = state.calendarSlots[dateStr];
-    if (slot && (slot.is_blocked || slot.is_booked)) {
+    if (slot?.is_booked) {
       cell.classList.add('busy');
-    } else if (slot) {
+    } else if (slot && !slot.is_blocked) {
       cell.classList.add('free');
+    } else {
+      cell.classList.add('closed');
+    }
+    if ([0, 6].includes(new Date(year, month, day).getDay())) {
+      cell.classList.add('weekend');
     }
 
     // Мастер может открыть/закрыть день прямо в календаре.
-    cell.dataset.date = dateStr;
     if (state.me?.is_admin) {
       cell.classList.add('clickable');
       cell.addEventListener('click', () => toggleCalendarDay(dateStr));
@@ -1245,6 +1403,7 @@ async function openMasterCabinet() {
   }
 
   showScreen('screen-master');
+  switchMasterTab('requests');
 
   const loading = document.getElementById('master-loading');
   const empty = document.getElementById('master-empty');
@@ -1295,6 +1454,14 @@ async function openMasterCabinet() {
   renderMasterList();
 }
 
+function switchMasterTab(tab) {
+  document.querySelectorAll('.master-tab').forEach((button) => {
+    button.classList.toggle('active', button.dataset.masterTab === tab);
+  });
+  document.getElementById('master-requests-panel')?.classList.toggle('hidden', tab !== 'requests');
+  document.getElementById('master-portfolio-panel')?.classList.toggle('hidden', tab !== 'portfolio');
+}
+
 function resetPortfolioForm() {
   state.editingPortfolioId = null;
   document.getElementById('portfolio-form-title').textContent = 'Добавить работу';
@@ -1305,6 +1472,7 @@ function resetPortfolioForm() {
   document.getElementById('portfolio-sort').value = '0';
   document.getElementById('portfolio-published').checked = true;
   document.getElementById('portfolio-image').value = '';
+  renderFolderSuggestions();
   document.getElementById('portfolio-form').classList.add('hidden');
 }
 
@@ -1319,6 +1487,18 @@ function editPortfolioItem(item) {
   document.getElementById('portfolio-published').checked = Boolean(item.is_published);
   document.getElementById('portfolio-image').value = '';
   document.getElementById('portfolio-form').classList.remove('hidden');
+  renderFolderSuggestions();
+}
+
+function renderFolderSuggestions() {
+  const container = document.getElementById('portfolio-folder-suggestions');
+  const input = document.getElementById('portfolio-place');
+  if (!container || !input) return;
+  const folders = [...new Set(state.adminPortfolio.map((item) => item.place).filter(Boolean))];
+  container.innerHTML = folders.map((folder) => `<button type="button" class="folder-chip" data-folder="${escapeHtml(folder)}">${escapeHtml(folder)}</button>`).join('');
+  container.querySelectorAll('[data-folder]').forEach((button) => button.addEventListener('click', () => {
+    input.value = button.dataset.folder || '';
+  }));
 }
 
 async function savePortfolioItem(event) {
@@ -1380,6 +1560,7 @@ function renderAdminPortfolio() {
   }));
   list.querySelectorAll('[data-portfolio-toggle]').forEach((button) => button.addEventListener('click', () => togglePortfolioItem(Number(button.dataset.portfolioToggle))));
   list.querySelectorAll('[data-portfolio-delete]').forEach((button) => button.addEventListener('click', () => deletePortfolioItem(Number(button.dataset.portfolioDelete))));
+  renderFolderSuggestions();
 }
 
 async function togglePortfolioItem(id) {
@@ -1415,6 +1596,10 @@ function renderMasterList() {
 
   state.masterRequests.forEach((req, index) => {
     const status = STATUS_MAP[req.status] || STATUS_MAP.new;
+    const queueRank = Number(req.queue_rank);
+    const queueLabel = Number.isInteger(queueRank) && queueRank > 0
+      ? `${['Первый', 'Второй', 'Третий', 'Четвёртый', 'Пятый'][queueRank - 1] || `${queueRank}-й`} в очереди`
+      : null;
 
     const card = document.createElement('div');
     card.className = 'request-card';
@@ -1422,7 +1607,7 @@ function renderMasterList() {
 
     card.innerHTML = `
       <div class="request-card-header">
-        <span class="request-id">#${req.id} · ${escapeHtml(req.location || '')}</span>
+        <span class="request-id">${queueLabel ? `${queueLabel} · ` : `Заявка #${req.id} · `}${escapeHtml(req.location || '')}</span>
         <span class="status-badge ${status.cssClass}">${status.icon} ${status.text}</span>
       </div>
       <div class="request-card-body">
@@ -1441,9 +1626,20 @@ function renderMasterList() {
 function buildMasterActions(req, container) {
   const btn = (label, cls, fn) => {
     const b = document.createElement('button');
+    b.type = 'button';
     b.className = `btn ${cls}`;
     b.textContent = label;
-    b.addEventListener('click', fn);
+    b.addEventListener('click', async () => {
+      if (b.disabled) return;
+      b.disabled = true;
+      b.classList.add('is-loading');
+      try {
+        await fn();
+      } finally {
+        b.disabled = false;
+        b.classList.remove('is-loading');
+      }
+    });
     container.appendChild(b);
   };
 
@@ -1456,7 +1652,7 @@ function buildMasterActions(req, container) {
       return;
     }
     toast('Готово ✨');
-    openMasterCabinet();
+    await openMasterCabinet();
   };
 
   if (req.status === 'new') {
@@ -1563,6 +1759,10 @@ function closeModal(id) {
 }
 
 function openMasterContact() {
+  if (state.me?.is_admin) {
+    toast('В мастерском режиме контакт с собой не нужен');
+    return;
+  }
   if (!requireTelegramAuth()) return;
   haptic('light');
   if (tg?.openTelegramLink) {
@@ -1662,6 +1862,8 @@ const App = {
   nextStep,
   prevStep,
   showEditOptions,
+  addReferenceFiles,
+  removeReference,
   submitRequest,
   openMyRequests,
   openRequestDetail,
@@ -1680,7 +1882,9 @@ const App = {
   closeModal,
   confirmScheduleDate,
   openPortfolio,
+  openImagePreview,
   filterPortfolio,
+  switchMasterTab,
   playIntro,
   closeIntro,
 };

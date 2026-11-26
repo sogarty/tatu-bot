@@ -68,7 +68,7 @@
           <span class="menu-btn-icon" aria-hidden="true">▦</span>
           <span class="menu-btn-text">Календарь</span>
         </button>
-        <button class="menu-btn" onclick="App.openMasterContact()">
+         <button class="menu-btn" data-client-only onclick="App.openMasterContact()">
           <span class="menu-btn-icon" aria-hidden="true">↗</span>
           <span class="menu-btn-text">Написать мастеру</span>
         </button>
@@ -111,12 +111,12 @@
     <div class="portfolio-contact"><button class="btn btn-accent full-width" onclick="App.startNewRequest()">Обсудить свою идею</button></div>
   </div>
 
-  <!-- 2. СОЗДАНИЕ ЗАЯВКИ (7 шагов, без фото) -->
+  <!-- 2. СОЗДАНИЕ ЗАЯВКИ -->
   <div id="screen-request-form" class="screen">
     <div class="form-header">
       <button class="btn-icon" onclick="App.cancelRequestForm()">←</button>
       <div class="progress-info">
-        <span id="step-label" class="step-label">Шаг 1 из 7</span>
+        <span id="step-label" class="step-label">Шаг 1 из 8</span>
         <div class="progress-bar">
           <div id="progress-fill" class="progress-fill"></div>
         </div>
@@ -142,8 +142,21 @@
       <p id="error-description" class="error-message hidden"></p>
     </div>
 
-    <!-- Шаг 2: Место -->
+    <!-- Шаг 2: Референсы -->
     <div id="step-2" class="form-step">
+      <h2>Покажи, что вдохновляет 📎</h2>
+      <p class="form-description">Прикрепи до 5 изображений: пример татуировки, эскиз, фото или настроение. Можно пропустить.</p>
+      <label class="drop-zone" for="field-references">
+        <span class="drop-zone-icon">＋</span>
+        <span class="drop-zone-content"><strong>Добавить референсы</strong><small>JPEG, PNG или WebP · до 8 МБ каждый</small></span>
+        <input id="field-references" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+      </label>
+      <div id="references-grid" class="references-grid"></div>
+      <p id="error-references" class="error-message hidden"></p>
+    </div>
+
+    <!-- Шаг 3: Место -->
+    <div id="step-3" class="form-step">
       <h2>Где будет тату? 📍</h2>
       <p class="form-description">
         Укажи часть тела. Например: «предплечье справа», «ребро», «лопатка».
@@ -162,8 +175,8 @@
       <p id="error-location" class="error-message hidden"></p>
     </div>
 
-    <!-- Шаг 3: Размер -->
-    <div id="step-3" class="form-step">
+    <!-- Шаг 4: Размер -->
+    <div id="step-4" class="form-step">
       <h2>Какой размер? 📏</h2>
       <p class="form-description">
         Примерно в сантиметрах или «примерно с ладонь». Мастер подскажет, если нужно поправить ✨
@@ -180,8 +193,8 @@
       <p id="error-size" class="error-message hidden"></p>
     </div>
 
-    <!-- Шаг 4: Цвет -->
-    <div id="step-4" class="form-step">
+    <!-- Шаг 5: Цвет -->
+    <div id="step-5" class="form-step">
       <h2>Ч/Б или цветная? 🎨</h2>
       <p class="form-description">Какой вариант тебе ближе? Это не ограничение.</p>
       <div class="color-options">
@@ -197,8 +210,8 @@
       <p id="error-color" class="error-message hidden"></p>
     </div>
 
-    <!-- Шаг 5: Срочность -->
-    <div id="step-5" class="form-step">
+    <!-- Шаг 6: Срочность -->
+    <div id="step-6" class="form-step">
       <h2>Нужна срочность? ⚡</h2>
       <p class="form-description">
         Срочная заявка проходит без очереди.<br>
@@ -220,8 +233,8 @@
       <p id="error-urgency" class="error-message hidden"></p>
     </div>
 
-    <!-- Шаг 6: Бриф -->
-    <div id="step-6" class="form-step">
+    <!-- Шаг 7: Бриф -->
+    <div id="step-7" class="form-step">
       <h2>Пара вопросов для эскиза 💡</h2>
       <p class="form-description">
         Это поможет мастеру точнее понять идею. Можно пропустить — просто нажми «Далее».
@@ -268,11 +281,20 @@
       </div>
     </div>
 
-    <!-- Шаг 7: Проверка -->
-    <div id="step-7" class="form-step">
+    <!-- Шаг 8: Проверка -->
+    <div id="step-8" class="form-step">
       <h2>Проверь заявку ✅</h2>
       <p class="form-description">Почти готово! Посмотри, всё ли верно:</p>
       <div class="review-card">
+        <div class="review-section">
+          <div class="review-item">
+            <span class="review-icon">📎</span>
+            <div>
+              <span class="review-label">Референсы</span>
+              <div id="review-references" class="review-references"></div>
+            </div>
+          </div>
+        </div>
         <div class="review-section">
           <div class="review-item">
             <span class="review-icon">💬</span>
@@ -311,7 +333,7 @@
         </div>
       </div>
       <div class="review-actions">
-        <button class="btn btn-secondary full-width" onclick="App.showEditOptions()">✏️ Изменить</button>
+        <button class="btn btn-secondary full-width" onclick="App.showEditOptions()">✏️ Изменить раздел</button>
         <button class="btn btn-accent full-width" id="btn-submit" onclick="App.submitRequest()">✉️ Отправить заявку</button>
       </div>
     </div>
@@ -388,13 +410,17 @@
           <h3>Анкета</h3>
           <div id="detail-brief" class="detail-brief"></div>
         </div>
+        <div class="detail-section hidden" id="detail-references-section">
+          <h3>Референсы</h3>
+          <div id="detail-references" class="detail-references"></div>
+        </div>
         <div class="detail-section hidden" id="detail-rejection-section">
           <h3>Причина отклонения</h3>
           <p id="detail-reason" class="detail-text"></p>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-accent full-width" onclick="App.openMasterContact()">💬 Написать мастеру</button>
+          <button class="btn btn-accent full-width" data-client-only onclick="App.openMasterContact()">💬 Написать мастеру</button>
       </div>
     </div>
   </div>
@@ -446,7 +472,7 @@
       <p id="calendar-master-hint-text">Нажми на день, чтобы открыть или закрыть его для записи.</p>
     </div>
 
-    <div class="calendar-legend">
+     <div class="calendar-legend">
       <div class="legend-item">
         <span class="legend-dot legend-free"></span>
         <span>Свободно</span>
@@ -459,6 +485,10 @@
         <span class="legend-dot legend-today"></span>
         <span>Сегодня</span>
       </div>
+      <div class="legend-item">
+        <span class="legend-dot legend-closed"></span>
+        <span>Закрыто</span>
+      </div>
     </div>
 
     <div id="calendar-empty" class="empty-state hidden">
@@ -469,7 +499,7 @@
     </div>
 
     <div class="calendar-footer">
-      <button class="btn btn-accent full-width" onclick="App.openMasterContact()">💬 Написать мастеру</button>
+      <button class="btn btn-accent full-width" data-client-only onclick="App.openMasterContact()">💬 Написать мастеру</button>
     </div>
   </div>
 
@@ -500,15 +530,27 @@
     </div>
 
     <div id="master-stats" class="detail-section"></div>
+    <div class="master-tabs" role="tablist">
+      <button class="master-tab active" data-master-tab="requests" onclick="App.switchMasterTab('requests')">Заявки</button>
+      <button class="master-tab" data-master-tab="portfolio" onclick="App.switchMasterTab('portfolio')">Портфолио</button>
+    </div>
 
-    <section class="master-portfolio detail-section">
-      <div class="section-heading"><h3>Портфолио</h3><button class="btn btn-accent" onclick="App.resetPortfolioForm(); document.getElementById('portfolio-form').classList.remove('hidden')">Добавить</button></div>
+    <section id="master-requests-panel" class="master-panel detail-section">
+      <div class="section-heading"><div><h3>Входящие заявки</h3><p class="section-note">Здесь появляются новые клиенты и текущие записи.</p></div></div>
+      <div id="master-loading" class="loading hidden"><div class="loading-spinner"></div></div>
+      <div id="master-empty" class="empty-state hidden"><div class="empty-icon">✦</div><h3>Новых заявок нет</h3><p>Все обращения разобраны.</p></div>
+      <div id="master-list" class="requests-list"></div>
+    </section>
+
+    <section id="master-portfolio-panel" class="master-panel master-portfolio detail-section hidden">
+      <div class="section-heading"><div><h3>Портфолио</h3><p class="section-note">Папки помогают держать работы в порядке.</p></div><button class="btn btn-accent" onclick="App.resetPortfolioForm(); document.getElementById('portfolio-form').classList.remove('hidden')">Добавить</button></div>
       <form id="portfolio-form" class="portfolio-admin-form hidden" onsubmit="App.savePortfolioItem(event)">
         <h4 id="portfolio-form-title">Добавить работу</h4>
         <label>Название<input id="portfolio-title" required maxlength="120"></label>
-        <label>Место на теле<input id="portfolio-place" required maxlength="120"></label>
-        <label>Теги через запятую<input id="portfolio-tags" placeholder="graphic, botanical"></label>
-        <label>URL изображения<input id="portfolio-image-url" placeholder="assets/portfolio/example.jpg"></label>
+         <label>Папка<input id="portfolio-place" required maxlength="120" placeholder="Например: графика, цвет, ботаника"></label>
+         <label>Описание и настроение<input id="portfolio-tags" placeholder="Что изображено и какое у него настроение"></label>
+         <div id="portfolio-folder-suggestions" class="folder-suggestions"></div>
+         <label class="portfolio-url-field">URL изображения<input id="portfolio-image-url" placeholder="Не нужно, если загружаешь файл"></label>
         <label>Загрузить файл<input id="portfolio-image" type="file" accept="image/jpeg,image/png,image/webp"></label>
         <label>Порядок<input id="portfolio-sort" type="number" value="0"></label>
         <label class="portfolio-check"><input id="portfolio-published" type="checkbox" checked> Опубликована</label>
@@ -517,17 +559,6 @@
       <div id="admin-portfolio-list" class="admin-portfolio-list"></div>
     </section>
 
-    <div id="master-loading" class="loading hidden">
-      <div class="loading-spinner"></div>
-    </div>
-
-    <div id="master-empty" class="empty-state hidden">
-      <div class="empty-icon">🕊</div>
-      <h3>Новых заявок нет</h3>
-      <p>Всё разобрано ✨</p>
-    </div>
-
-    <div id="master-list" class="requests-list"></div>
   </div>
 
   <!-- Конфетти -->
@@ -556,8 +587,22 @@
   <div id="intro-overlay" class="intro-overlay" aria-hidden="true">
     <div class="intro-word">KELL</div>
     <div class="intro-images"><img class="intro-sketch" src="assets/portfolio/intro-sketch.jpg" alt=""><img class="intro-stencil" src="assets/portfolio/intro-stencil.jpg" alt=""><img class="intro-final" src="assets/portfolio/intro-final.jpg" alt=""></div>
-    <div class="intro-caption"><span>TATTOO KELL · АРИАДНА</span><b>Идея обретает форму.<br>Форма остаётся с тобой.</b></div>
+    <div class="intro-caption">
+      <span>TATTOO KELL · АРИАДНА</span>
+      <b>Идея обретает форму.<br>Форма остаётся с тобой.</b>
+      <p>В тату-индустрии с 2020 года. Художественная школа и академическая база помогают создавать чёрно-белые и цветные работы с точной композицией.</p>
+      <p>Приём в Электростали: стерильность, внимание к деталям и спокойная атмосфера на каждом этапе.</p>
+    </div>
     <button class="intro-skip" onclick="App.closeIntro()">Пропустить →</button>
+  </div>
+
+  <div id="modal-image-preview" class="modal hidden" aria-label="Просмотр работы">
+    <div class="modal-overlay" onclick="App.closeModal('modal-image-preview')"></div>
+    <div class="image-preview-content">
+      <button class="btn-icon image-preview-close" onclick="App.closeModal('modal-image-preview')" aria-label="Закрыть">×</button>
+      <img id="image-preview" src="" alt="">
+      <p id="image-preview-caption"></p>
+    </div>
   </div>
 
   <!-- Тосты -->

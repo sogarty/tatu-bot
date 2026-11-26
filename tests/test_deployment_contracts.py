@@ -45,7 +45,7 @@ def test_alembic_head_applies_idempotency_schema(tmp_path):
 
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "006",
+            "007",
         )
         columns = {
             row[1] for row in connection.execute("PRAGMA table_info(tattoo_request)")
@@ -55,6 +55,12 @@ def test_alembic_head_applies_idempotency_schema(tmp_path):
             row[1] for row in connection.execute("PRAGMA index_list(tattoo_request)")
         }
         assert "uq_tattoo_request_user_idempotency" in indexes
+        reference_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(request_reference)")
+        }
+        assert {"image_data", "image_content_type", "has_uploaded_image"} <= (
+            reference_columns
+        )
 
 
 def test_health_requires_webhook_readiness(monkeypatch):

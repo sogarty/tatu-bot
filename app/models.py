@@ -237,6 +237,13 @@ class RequestReference(Base):
     )
     order_index: Mapped[int] = mapped_column(Integer, nullable=False)
     file_id: Mapped[str] = mapped_column(TEXT, nullable=False)
+    image_data: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, deferred=True
+    )
+    image_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    has_uploaded_image: Mapped[bool] = mapped_column(
+        Boolean, server_default=false(), nullable=False
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), nullable=False
@@ -247,7 +254,6 @@ class RequestReference(Base):
 
     def __repr__(self) -> str:
         return f"<RequestReference id={self.id} index={self.order_index}>"
-
 
 # ─── brief_question ──────────────────────────────────────────────────────────
 
@@ -454,7 +460,9 @@ class PortfolioItem(Base):
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     place: Mapped[str] = mapped_column(String(120), nullable=False)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    image_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    image_data: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, deferred=True
+    )
     image_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     is_published: Mapped[bool] = mapped_column(
