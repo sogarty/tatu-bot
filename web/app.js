@@ -121,6 +121,7 @@ const state = {
   referenceUploadRequestId: null,
   uploadedReferenceCount: 0,
   portfolioObjectUrls: new Map(),
+  archiveUndo: null,
 };
 
 function emptyDraft() {
@@ -165,6 +166,46 @@ function toast(message, ms = 2600) {
   el.classList.remove('hidden');
   clearTimeout(toast._t);
   toast._t = setTimeout(() => el.classList.add('hidden'), ms);
+}
+
+function showArchiveUndo(request) {
+  const bar = document.getElementById('archive-undo');
+  const text = document.getElementById('archive-undo-text');
+  const button = document.getElementById('archive-undo-button');
+  if (!bar || !text || !button) return;
+
+  if (state.archiveUndo?.timer) clearTimeout(state.archiveUndo.timer);
+  state.archiveUndo = { request, timer: null };
+  text.textContent = `Заявка #${request.id} удалена`;
+  bar.classList.remove('hidden');
+  button.disabled = false;
+  button.onclick = restoreArchivedRequest;
+  state.archiveUndo.timer = setTimeout(() => {
+    state.archiveUndo = null;
+    bar.classList.add('hidden');
+  }, 5000);
+}
+
+async function restoreArchivedRequest() {
+  const pending = state.archiveUndo;
+  if (!pending) return;
+  const button = document.getElementById('archive-undo-button');
+  if (button) button.disabled = true;
+  const res = await apiPost(`trash/${pending.request.id}/restore`, {});
+  if (!res.ok) {
+    if (button) button.disabled = false;
+    tgAlert(res.error || 'Не удалось восстановить заявку');
+    return;
+  }
+  clearTimeout(pending.timer);
+  state.archiveUndo = null;
+  document.getElementById('archive-undo')?.classList.add('hidden');
+  const restored = res.data || pending.request;
+  state.masterRequests = [restored, ...state.masterRequests].sort((a, b) =>
+    String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''))
+  );
+  renderMasterList();
+  toast('Заявка восстановлена');
 }
 
 function initTelegram() {
@@ -256,7 +297,7 @@ const apiPost = (endpoint, body, headers = {}) =>
   });
 
 const apiUpload = (endpoint, formData) =>
-  apiFetch(endpoint, { method: 'POST', body: formData });
+  apiFetch(endpoint, { method: 'POST', body: formData, timeoutMs: 45000 });
 
 /* ===================================================
    NAVIGATION
@@ -1087,6 +1128,7 @@ async function submitRequest() {
   state.uploadedReferenceCount = Math.max(state.uploadedReferenceCount, existingCount);
 
   for (let index = state.uploadedReferenceCount; index < state.referenceFiles.length; index += 1) {
+    if (index < state.uploadedReferenceCount) continue;
     const file = state.referenceFiles[index];
     const form = new FormData();
     form.append('image', file);
@@ -1097,6 +1139,14 @@ async function submitRequest() {
       upload = { ok: false };
     }
     if (!upload.ok) {
+      // Если timeout случился после commit, сервер уже мог сохранить фото.
+      // Проверяем заявку перед тем, как просить человека нажать повторно.
+      const check = await apiGet(`requests/${res.data.id}`);
+      const savedCount = Array.isArray(check.data?.references) ? check.data.references.length : 0;
+      if (check.ok && savedCount > index) {
+        state.uploadedReferenceCount = savedCount;
+        continue;
+      }
       state.uploadedReferenceCount = index;
       submitting = false;
       btn.textContent = original;
@@ -1656,6 +1706,18 @@ async function deletePortfolioItem(id) {
   renderPortfolio();
 }
 
+async function deleteMasterRequest(request) {
+  if (!confirm(`Удалить заявку #${request.id} из списка?`)) return;
+  const res = await apiFetch(`trash/${request.id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    tgAlert(res.error || 'Не удалось удалить заявку');
+    return;
+  }
+  state.masterRequests = state.masterRequests.filter((item) => item.id !== request.id);
+  renderMasterList();
+  showArchiveUndo(request);
+}
+
 /** Строка «кто клиент» для карточки мастера. */
 function masterClientLine(req) {
   const name = req.client_name || 'Клиент';
@@ -1771,6 +1833,10 @@ function buildMasterActions(req, container) {
   } else if (req.status === 'rejected') {
     btn('↩️ Вернуть', 'btn-secondary', () =>
       act(`requests/${req.id}/reactivate`, {}, 'Вернуть заявку в очередь?'));
+  }
+
+  if (['completed', 'rejected', 'cancelled'].includes(req.status)) {
+    btn('Удалить', 'btn-danger', () => deleteMasterRequest(req));
   }
 
   btn('👁 Открыть', 'btn-secondary', () => openRequestDetail(req.id));

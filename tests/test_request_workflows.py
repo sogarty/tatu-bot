@@ -16,6 +16,7 @@ from app.bot.services.request_service import (
 )
 from app.dependencies import InvalidTransitionError
 from app.models import Appointment, Base, MasterSlot, TattooRequest, TgUser
+from app.routers.requests import restore_from_trash
 
 
 def run(coro):
@@ -140,6 +141,38 @@ def test_cancelled_appointment_can_be_reused_for_rescheduling():
 
             assert request.status == "scheduled"
             assert appointment.status == "confirmed"
+        await engine.dispose()
+
+    run(scenario())
+
+
+def test_archived_closed_request_can_be_restored():
+    async def scenario():
+        engine, factory = await make_session()
+        async with factory() as session:
+            request = await create_request(session, 1, 101)
+            request.status = "completed"
+            request.is_archived = True
+            await session.commit()
+
+            restored = await restore_from_trash(
+                request.id,
+                session,
+                {"user_id": 42, "is_admin": True},
+            )
+
+            assert restored.id == request.id
+            assert restored.status == "completed"
+            assert restored.is_archived is False
+
+            # A retry after a successful restore is harmless and returns the
+            # current row instead of producing a false error.
+            retried = await restore_from_trash(
+                request.id,
+                session,
+                {"user_id": 42, "is_admin": True},
+            )
+            assert retried.is_archived is False
         await engine.dispose()
 
     run(scenario())

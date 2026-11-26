@@ -12,7 +12,7 @@ import uuid
 from datetime import date as date_type, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -179,6 +179,7 @@ async def me(
 )
 async def create_request(
     data: TattooRequestCreate,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -254,7 +255,7 @@ async def create_request(
 
     # Перечитываем со связями, иначе сериализация упадёт
     created = await _load_locked(session, req.id)
-    await _notify_master_new_request(req)
+    background_tasks.add_task(_notify_master_new_request, req)
     return created
 
 
@@ -508,14 +509,19 @@ async def finalize_request(
 @router.post("/requests/{request_id}/accept", response_model=TattooRequestOut)
 async def accept_request(
     request_id: int,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     _admin: dict = Depends(admin_only),
 ):
     """Мастер принимает заявку (new → accepted)."""
+    current = await _load_locked(session, request_id)
+    if current.status == "accepted":
+        return current
     req = await transition_status(session, request_id, "accepted")
     await session.commit()
     result = await _load_locked(session, request_id)
-    await _notify_request_client(
+    background_tasks.add_task(
+        _notify_request_client,
         result,
         NotificationService.request_accepted(request_id),
         "request_accepted",
@@ -530,12 +536,16 @@ class RejectPayload(BaseModel):
 @router.post("/requests/{request_id}/reject", response_model=TattooRequestOut)
 async def reject_request(
     request_id: int,
+    background_tasks: BackgroundTasks,
     data: RejectPayload | None = None,
     session: AsyncSession = Depends(get_db),
     _admin: dict = Depends(admin_only),
 ):
     """Мастер отклоняет заявку."""
     reason = data.reason if data and data.reason else None
+    current = await _load_locked(session, request_id)
+    if current.status == "rejected":
+        return current
     req = await transition_status(
         session,
         request_id,
@@ -544,7 +554,8 @@ async def reject_request(
     )
     await session.commit()
     result = await _load_locked(session, request_id)
-    await _notify_request_client(
+    background_tasks.add_task(
+        _notify_request_client,
         result,
         NotificationService.request_rejected(request_id, reason),
         "request_rejected",
@@ -555,14 +566,19 @@ async def reject_request(
 @router.post("/requests/{request_id}/proceed", response_model=TattooRequestOut)
 async def proceed_to_sketch(
     request_id: int,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     _admin: dict = Depends(admin_only),
 ):
     """Мастер берётся за эскиз (accepted → in_progress)."""
+    current = await _load_locked(session, request_id)
+    if current.status == "in_progress":
+        return current
     req = await transition_status(session, request_id, "in_progress")
     await session.commit()
     result = await _load_locked(session, request_id)
-    await _notify_request_client(
+    background_tasks.add_task(
+        _notify_request_client,
         result,
         NotificationService.request_in_progress(request_id),
         "request_in_progress",
@@ -578,6 +594,7 @@ class SchedulePayload(BaseModel):
 async def schedule_request(
     request_id: int,
     data: SchedulePayload,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     _admin: dict = Depends(admin_only),
 ):
@@ -588,6 +605,14 @@ async def schedule_request(
         raise BadRequestError("Дата должна быть в формате ГГГГ-ММ-ДД")
 
     req = await _load_locked(session, request_id)
+    if (
+        req.status == "scheduled"
+        and req.appointment is not None
+        and req.appointment.status == "confirmed"
+        and req.appointment.slot is not None
+        and req.appointment.slot.slot_date == target_date
+    ):
+        return req
     _validate_transition(req.status, "scheduled")
 
     slot = (
@@ -659,7 +684,8 @@ async def schedule_request(
         await session.rollback()
         raise ConflictError("На эту дату уже назначен другой сеанс") from exc
     result = await _load_locked(session, request_id)
-    await _notify_request_client(
+    background_tasks.add_task(
+        _notify_request_client,
         result,
         NotificationService.appointment_scheduled(
             request_id, target_date.isoformat()
@@ -672,14 +698,19 @@ async def schedule_request(
 @router.post("/requests/{request_id}/complete", response_model=TattooRequestOut)
 async def complete_request(
     request_id: int,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     _admin: dict = Depends(admin_only),
 ):
     """Завершить сеанс (scheduled → completed)."""
+    current = await _load_locked(session, request_id)
+    if current.status == "completed":
+        return current
     req = await complete_session(session, request_id)
     await session.commit()
     result = await _load_locked(session, request_id)
-    await _notify_request_client(
+    background_tasks.add_task(
+        _notify_request_client,
         result,
         NotificationService.appointment_completed(request_id),
         "appointment_completed",
@@ -690,14 +721,23 @@ async def complete_request(
 @router.post("/requests/{request_id}/cancel", response_model=TattooRequestOut)
 async def cancel_appointment(
     request_id: int,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     _admin: dict = Depends(admin_only),
 ):
     """Отменить запись, вернуть заявку в очередь."""
+    current = await _load_locked(session, request_id)
+    if (
+        current.status == "new"
+        and current.appointment is not None
+        and current.appointment.status == "cancelled"
+    ):
+        return current
     req = await cancel_request_appointment(session, request_id)
     await session.commit()
     result = await _load_locked(session, request_id)
-    await _notify_request_client(
+    background_tasks.add_task(
+        _notify_request_client,
         result,
         NotificationService.appointment_cancelled(request_id),
         "appointment_cancelled",
@@ -714,6 +754,8 @@ async def reactivate_request(
     """Возобновить заявку из rejected (rejected → new)."""
     req = await _load_locked(session, request_id)
 
+    if req.status == "new":
+        return req
     if req.status != "rejected":
         raise InvalidTransitionError(
             f"Заявка не в статусе rejected (текущий: {req.status})"
@@ -768,3 +810,20 @@ async def delete_from_trash(
 
     req.is_archived = True
     await session.commit()
+
+
+@router.post("/trash/{request_id}/restore", response_model=TattooRequestOut)
+async def restore_from_trash(
+    request_id: int,
+    session: AsyncSession = Depends(get_db),
+    _admin: dict = Depends(admin_only),
+):
+    """Restore a recently archived closed request for the master."""
+    req = await _load_locked(session, request_id)
+    if req.status not in ("completed", "rejected", "cancelled"):
+        raise BadRequestError("Восстановить можно только закрытую заявку")
+    if not req.is_archived:
+        return req
+    req.is_archived = False
+    await session.commit()
+    return await _load_locked(session, request_id)

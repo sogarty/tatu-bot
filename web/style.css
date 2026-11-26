@@ -421,6 +421,15 @@ body {
   width: 62px;
   height: 62px;
   object-fit: cover;
+  flex: 0 0 62px;
+  border-radius: 6px;
+}
+
+.review-value,
+.review-brief-item .value,
+.detail-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Поля формы */
@@ -875,13 +884,15 @@ body {
 
 .request-card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .request-card-actions .btn {
-  flex: 1;
+  flex: 1 1 120px;
   padding: 8px;
   font-size: 12px;
+  min-width: 0;
 }
 
 .request-card-actions .btn:disabled,
@@ -951,6 +962,7 @@ body {
   overflow-y: auto;
   animation: slideUpModal 0.3s ease-out;
   margin-bottom: 0;
+  overscroll-behavior: contain;
 }
 
 .modal-large {
@@ -987,6 +999,66 @@ body {
   position: sticky;
   bottom: 0;
   background: var(--surface);
+}
+
+.archive-undo {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(92px + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px));
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100% - 24px), 420px);
+  margin: 0 auto;
+  padding: 12px 14px;
+  color: #fff;
+  background: #222127;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 9px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.28);
+  animation: slideUpModal .2s ease-out;
+}
+
+.archive-undo > span:first-child {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.archive-undo button {
+  flex: 0 0 auto;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: #f2b8c3;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.archive-undo button:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+.archive-undo-timer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 0 0 9px 9px;
+  background: #df3c59;
+  transform-origin: left;
+  animation: archiveUndoTimer 5s linear forwards;
+}
+
+@keyframes archiveUndoTimer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
 /* ---------- Карточка заявки (детали) ---------- */
@@ -2165,6 +2237,29 @@ html, body { background: #07070a; color: #f0eae2; }
 
 #screen-request-form .reference-thumb {
   border-radius: 7px;
+}
+
+#screen-request-form .references-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+#screen-request-form .reference-thumb {
+  min-width: 0;
+  width: 100%;
+}
+
+#screen-request-form .review-references {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: 100%;
+}
+
+#screen-request-form .review-references img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
 }
 
 #screen-request-form .review-card {
