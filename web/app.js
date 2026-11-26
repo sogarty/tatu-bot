@@ -118,6 +118,8 @@ const state = {
   editingPortfolioId: null,
   referenceFiles: [],
   referenceObjectUrls: new Map(),
+  referenceUploadRequestId: null,
+  uploadedReferenceCount: 0,
   portfolioObjectUrls: new Map(),
 };
 
@@ -593,6 +595,7 @@ function hasDraftContent() {
       d.size ||
       d.colorMode ||
       d.isUrgent ||
+      state.referenceFiles.length > 0 ||
       Object.values(d.brief || {}).some(Boolean)
   );
 }
@@ -617,6 +620,8 @@ function resetFormFields() {
   document.getElementById('field-size').value = '';
   document.getElementById('field-brief-other').value = '';
   state.referenceFiles = [];
+  state.referenceUploadRequestId = null;
+  state.uploadedReferenceCount = 0;
   state.draft.references = [];
   state.referenceObjectUrls.forEach((url) => URL.revokeObjectURL(url));
   state.referenceObjectUrls.clear();
@@ -1020,30 +1025,46 @@ async function submitRequest() {
     'Idempotency-Key': state.requestIdempotencyKey,
   });
 
-  submitting = false;
-  btn.textContent = original;
-  btn.disabled = false;
-
   if (!res.ok) {
+    submitting = false;
+    btn.textContent = original;
+    btn.disabled = false;
     tgAlert('Не удалось отправить заявку: ' + (res.error || 'ошибка'));
     return;
   }
 
-  for (const file of state.referenceFiles) {
+  // Создание заявки идемпотентно, а загрузка фото продолжается с места сбоя.
+  // Повторный тап не создаёт новую заявку и не дублирует уже сохранённые фото.
+  state.referenceUploadRequestId = res.data.id;
+  const existingCount = Array.isArray(res.data.references) ? res.data.references.length : 0;
+  state.uploadedReferenceCount = Math.max(state.uploadedReferenceCount, existingCount);
+
+  for (let index = state.uploadedReferenceCount; index < state.referenceFiles.length; index += 1) {
+    const file = state.referenceFiles[index];
     const form = new FormData();
     form.append('image', file);
     const upload = await apiUpload(`requests/${res.data.id}/references`, form);
     if (!upload.ok) {
-      tgAlert(upload.error || 'Заявка создана, но один из референсов не загрузился');
-      break;
+      state.uploadedReferenceCount = index;
+      submitting = false;
+      btn.textContent = original;
+      btn.disabled = false;
+      tgAlert(`Заявка сохранена, но фото ${index + 1} не загрузилось. Нажми «Отправить заявку» ещё раз.`);
+      return;
     }
+    state.uploadedReferenceCount = index + 1;
   }
 
+  submitting = false;
+  btn.textContent = original;
+  btn.disabled = false;
   launchConfetti();
   document.getElementById('success-request-id').textContent = `Заявка #${res.data.id} отправлена!`;
   showScreen('screen-success');
   state.draft = null;
   state.requestIdempotencyKey = null;
+  state.referenceUploadRequestId = null;
+  state.uploadedReferenceCount = 0;
 }
 
 /* ===================================================
@@ -1613,14 +1634,37 @@ function renderMasterList() {
       <div class="request-card-body">
         <div class="meta-item">${escapeHtml(masterClientLine(req))}</div>
         <div class="meta-item">💬 ${escapeHtml((req.description || '').slice(0, 80))}…</div>
+        <div class="meta-item reference-summary">📎 Референсы: ${req.references?.length || 0}</div>
+        ${req.references?.length ? `<div class="master-reference-strip" aria-label="Референсы заявки">
+          ${req.references.map((reference, refIndex) => `<button type="button" class="master-reference-thumb" data-request-id="${req.id}" data-reference-id="${reference.id}" aria-label="Открыть референс ${refIndex + 1}"><span>Фото ${refIndex + 1}</span></button>`).join('')}
+        </div>` : ''}
       </div>
       <div class="request-card-actions" id="actions-${req.id}"></div>`;
 
     const actions = card.querySelector(`#actions-${req.id}`);
     buildMasterActions(req, actions);
 
+    card.querySelectorAll('.master-reference-thumb').forEach((thumb) => {
+      const referenceId = Number(thumb.dataset.referenceId);
+      thumb.addEventListener('click', () => openRequestReference(req.id, referenceId, `Референс ${referenceId}`));
+      loadReferenceThumb(req.id, referenceId, thumb);
+    });
+
     container.appendChild(card);
   });
+}
+
+async function loadReferenceThumb(requestId, referenceId, button) {
+  const response = await fetch(`${API_BASE}requests/${requestId}/references/${referenceId}/image`, {
+    headers: authHeader(),
+  });
+  if (!response.ok) return;
+  const url = URL.createObjectURL(await response.blob());
+  state.referenceObjectUrls.set(`server:${requestId}:${referenceId}`, url);
+  const image = document.createElement('img');
+  image.src = url;
+  image.alt = 'Референс';
+  button.replaceChildren(image);
 }
 
 function buildMasterActions(req, container) {

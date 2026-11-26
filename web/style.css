@@ -15,6 +15,8 @@
   --neutral: #7A7A8E;
   --bg: #F8F8FA;
   --surface: #FFFFFF;
+  --surface-muted: #F1F1F4;
+  --border: rgba(26, 26, 46, 0.14);
 
   /* Типографика */
   --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -717,6 +719,46 @@ body {
   align-items: center;
   justify-content: center;
   line-height: 1;
+}
+
+/* Референсы должны быть видны мастеру прямо в списке заявок. */
+.reference-summary {
+  color: var(--neutral);
+  font-weight: 600;
+}
+
+.master-reference-strip {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.master-reference-thumb {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--neutral);
+  overflow: hidden;
+  padding: 0;
+  cursor: pointer;
+}
+
+.master-reference-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.master-reference-thumb span {
+  display: block;
+  padding-top: 20px;
+  font-size: 10px;
 }
 
 /* Навигация формы */
