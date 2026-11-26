@@ -276,6 +276,24 @@ function showScreen(screenId) {
   if (nav) nav.classList.toggle('hidden', hideNav.includes(id));
 
   updateBottomNav(id);
+  if (id !== 'screen-request-form') setKeyboardInset(0);
+}
+
+function setKeyboardInset(inset) {
+  document.documentElement.style.setProperty('--keyboard-inset', `${Math.max(0, inset)}px`);
+}
+
+function initViewportHandling() {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  const update = () => {
+    const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+    setKeyboardInset(inset > 80 ? inset : 0);
+  };
+  viewport.addEventListener('resize', update);
+  viewport.addEventListener('scroll', update);
+  window.addEventListener('resize', update);
+  update();
 }
 
 function updateClientOnlyControls() {
@@ -395,6 +413,7 @@ function showFatal(title, text) {
 
 async function init() {
   initTelegram();
+  initViewportHandling();
   showScreen('screen-loading');
 
   if (!tg || !tg.initData) {

@@ -2125,6 +2125,9 @@ html, body { background: #07070a; color: #f0eae2; }
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid #211e24;
   background: rgba(8,8,11,.97);
+  bottom: var(--keyboard-inset, 0px);
+  transition: bottom 120ms ease-out;
+  will-change: bottom;
 }
 
 #screen-request-form .form-nav .btn {
