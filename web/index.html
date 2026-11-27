@@ -8,7 +8,8 @@
   <!-- Обязательно: без этого скрипта Telegram не передаёт initData,
        и приложение не может авторизоваться на сервере. -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=14">
+  <link rel="stylesheet" href="theme.css?v=4">
 </head>
 <body>
   <!-- ===== ЭКРАНЫ ===== -->
@@ -60,16 +61,12 @@
       </div>
 
       <div class="home-menu">
-        <button class="menu-btn" onclick="App.openMyRequests()">
-          <span class="menu-btn-icon" aria-hidden="true">◷</span>
-          <span class="menu-btn-text">Мои заявки</span>
-        </button>
         <button class="menu-btn" onclick="App.openCalendar()">
-          <span class="menu-btn-icon" aria-hidden="true">▦</span>
+          <span class="menu-btn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M7.5 3.5v3M16.5 3.5v3M3.5 9.5h17M8 13h2M14 13h2M8 17h2"/></svg></span>
           <span class="menu-btn-text">Календарь</span>
         </button>
          <button class="menu-btn" data-client-only onclick="App.openMasterContact()">
-          <span class="menu-btn-icon" aria-hidden="true">↗</span>
+          <span class="menu-btn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5h16v11H9l-5 3v-14Z"/><path d="M8 10h8M8 13h5"/></svg></span>
           <span class="menu-btn-text">Написать мастеру</span>
         </button>
       </div>
@@ -77,7 +74,7 @@
       <section class="home-portfolio">
         <div class="home-section-heading"><h2>РАБОТЫ</h2><button onclick="App.openPortfolio()">Все работы <span>→</span></button></div>
         <div class="home-work-strip">
-          <button onclick="App.openPortfolio()"><img src="assets/portfolio/k12.jpg" alt="Чёрный рукав"><span>Чёрный рукав</span></button>
+          <button onclick="App.openPortfolio()"><img src="assets/portfolio/k12.jpg" alt="Крылья и хризантема"><span>Крылья и хризантема</span></button>
           <button onclick="App.openPortfolio()"><img src="assets/portfolio/k01.jpg" alt="Пион"><span>Пион</span></button>
           <button onclick="App.openPortfolio()"><img src="assets/portfolio/k09.jpg" alt="Стебли"><span>Стебли</span></button>
         </div>
@@ -85,7 +82,7 @@
 
       <div class="home-menu" id="home-master-block" style="display:none">
         <button class="menu-btn" onclick="App.openMasterCabinet()">
-          <span class="menu-btn-icon">🔑</span>
+          <span class="menu-btn-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3.5"/><path d="M10.5 10.5 20 20m-4-4 2-2m-5-1 2-2"/></svg></span>
           <span class="menu-btn-text">Кабинет мастера</span>
         </button>
       </div>
@@ -122,10 +119,14 @@
         </div>
       </div>
     </div>
+    <div class="form-nav">
+      <button id="btn-back" class="btn btn-secondary" onclick="App.prevStep()" disabled>← Назад</button>
+      <button id="btn-next" class="btn btn-accent" onclick="App.nextStep()">Далее →</button>
+    </div>
 
     <!-- Шаг 1: Описание -->
     <div id="step-1" class="form-step active">
-      <h2>Расскажи о своей идее ✍️</h2>
+      <h2>Расскажи о своей идее</h2>
       <p class="form-description">
         Самый важный шаг. Опиши, что хочешь увидеть на теле: что изображено,
         какой вайб, есть ли символы или надписи.
@@ -144,7 +145,7 @@
 
     <!-- Шаг 2: Референсы -->
     <div id="step-2" class="form-step">
-      <h2>Покажи, что вдохновляет 📎</h2>
+      <h2>Покажи, что вдохновляет</h2>
       <p class="form-description">Прикрепи до 5 изображений: пример татуировки, эскиз, фото или настроение. Можно пропустить.</p>
       <label class="drop-zone" for="field-references">
         <span class="drop-zone-icon">＋</span>
@@ -157,7 +158,7 @@
 
     <!-- Шаг 3: Место -->
     <div id="step-3" class="form-step">
-      <h2>Где будет тату? 📍</h2>
+      <h2>Где будет тату?</h2>
       <p class="form-description">
         Укажи часть тела. Например: «предплечье справа», «ребро», «лопатка».
       </p>
@@ -177,7 +178,7 @@
 
     <!-- Шаг 4: Размер -->
     <div id="step-4" class="form-step">
-      <h2>Какой размер? 📏</h2>
+      <h2>Какой размер?</h2>
       <p class="form-description">
         Примерно в сантиметрах или «примерно с ладонь». Мастер подскажет, если нужно поправить ✨
       </p>
@@ -195,7 +196,7 @@
 
     <!-- Шаг 5: Цвет -->
     <div id="step-5" class="form-step">
-      <h2>Ч/Б или цветная? 🎨</h2>
+      <h2>Чёрно-белая или цветная?</h2>
       <p class="form-description">Какой вариант тебе ближе? Это не ограничение.</p>
       <div class="color-options">
         <button class="color-option" data-value="bw">
@@ -212,18 +213,18 @@
 
     <!-- Шаг 6: Срочность -->
     <div id="step-6" class="form-step">
-      <h2>Нужна срочность? ⚡</h2>
+      <h2>Насколько срочно?</h2>
       <p class="form-description">
         Срочная заявка проходит без очереди.<br>
         Доплата: <strong id="urgent-price-label">уточняется</strong>
       </p>
       <div class="urgency-options">
         <button class="urgency-option" data-value="yes">
-          <span class="urgency-icon">⚡</span>
+          <span class="urgency-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13.5 2.5 5 13h6l-.5 8.5L19 11h-6l.5-8.5Z"/></svg></span>
           <span class="urgency-label">Да, срочно</span>
         </button>
         <button class="urgency-option" data-value="no">
-          <span class="urgency-icon">○</span>
+          <span class="urgency-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/></svg></span>
           <span class="urgency-label">Нет, обычная очередь</span>
         </button>
       </div>
@@ -235,26 +236,26 @@
 
     <!-- Шаг 7: Бриф -->
     <div id="step-7" class="form-step">
-      <h2>Пара вопросов для эскиза 💡</h2>
+      <h2>Пара вопросов для эскиза</h2>
       <p class="form-description">
         Это поможет мастеру точнее понять идею. Можно пропустить — просто нажми «Далее».
       </p>
       <div class="brief-container">
         <div id="brief-q1" class="brief-question">
-          <p class="brief-text">У тебя был опыт тату? 🖊</p>
+          <p class="brief-text">У тебя уже есть татуировки?</p>
           <div class="brief-options">
-            <button class="brief-option" data-key="experience_level" data-value="none">🆕 Нет, это будет первая</button>
-            <button class="brief-option" data-key="experience_level" data-value="few">🖊 Была 1–2</button>
-            <button class="brief-option" data-key="experience_level" data-value="many">🎨 Было 3+</button>
+            <button class="brief-option" data-key="experience_level" data-value="none">Это будет первая</button>
+            <button class="brief-option" data-key="experience_level" data-value="few">Есть 1–2</button>
+            <button class="brief-option" data-key="experience_level" data-value="many">Есть три или больше</button>
           </div>
         </div>
         <div id="brief-q2" class="brief-question">
-          <p class="brief-text">Какой стиль тебе ближе? 🎭</p>
+          <p class="brief-text">Какой стиль тебе ближе?</p>
           <div class="brief-options grid-2">
-            <button class="brief-option" data-key="preferred_style" data-value="realism">🎯 Реализм</button>
-            <button class="brief-option" data-key="preferred_style" data-value="graphics">✏️ Графика</button>
-            <button class="brief-option" data-key="preferred_style" data-value="watercolor">💧 Акварель</button>
-            <button class="brief-option" data-key="preferred_style" data-value="geometry">🔷 Геометрия</button>
+            <button class="brief-option" data-key="preferred_style" data-value="realism">Реализм</button>
+            <button class="brief-option" data-key="preferred_style" data-value="graphics">Графика</button>
+            <button class="brief-option" data-key="preferred_style" data-value="watercolor">Акварель</button>
+            <button class="brief-option" data-key="preferred_style" data-value="geometry">Геометрия</button>
             <button class="brief-option brief-option-other" data-key="preferred_style" data-value="other">Другое</button>
           </div>
           <div id="brief-other-field" class="form-field hidden">
@@ -262,20 +263,20 @@
           </div>
         </div>
         <div id="brief-q3" class="brief-question">
-          <p class="brief-text">Откуда вдохновение? 💫</p>
+          <p class="brief-text">Где ты ищешь идеи для татуировки?</p>
           <div class="brief-options">
-            <button class="brief-option" data-key="inspiration_source" data-value="pinterest">📌 Pinterest</button>
-            <button class="brief-option" data-key="inspiration_source" data-value="instagram">📷 Instagram</button>
-            <button class="brief-option" data-key="inspiration_source" data-value="own">🖼 Свои референсы</button>
-            <button class="brief-option" data-key="inspiration_source" data-value="dontknow">🤷 Не знаю</button>
+            <button class="brief-option" data-key="inspiration_source" data-value="pinterest">Pinterest</button>
+            <button class="brief-option" data-key="inspiration_source" data-value="instagram">Instagram</button>
+            <button class="brief-option" data-key="inspiration_source" data-value="own">Свои референсы</button>
+            <button class="brief-option" data-key="inspiration_source" data-value="dontknow">Пока не знаю</button>
           </div>
         </div>
         <div id="brief-q4" class="brief-question">
-          <p class="brief-text">Что важнее всего? ✨</p>
+          <p class="brief-text">Что для тебя важнее всего?</p>
           <div class="brief-options">
-            <button class="brief-option" data-key="importance" data-value="aesthetics">🎨 Эстетика</button>
-            <button class="brief-option" data-key="importance" data-value="meaning">💭 Смысл</button>
-            <button class="brief-option" data-key="importance" data-value="safety">🛡 Безопасность</button>
+            <button class="brief-option" data-key="importance" data-value="aesthetics">Эстетика</button>
+            <button class="brief-option" data-key="importance" data-value="meaning">Смысл</button>
+            <button class="brief-option" data-key="importance" data-value="safety">Безопасность</button>
           </div>
         </div>
       </div>
@@ -283,7 +284,7 @@
 
     <!-- Шаг 8: Проверка -->
     <div id="step-8" class="form-step">
-      <h2>Проверь заявку ✅</h2>
+      <h2>Проверь заявку</h2>
       <p class="form-description">Почти готово! Посмотри, всё ли верно:</p>
       <div class="review-card">
         <div class="review-section">
@@ -338,10 +339,6 @@
       </div>
     </div>
 
-    <div class="form-nav">
-      <button id="btn-back" class="btn btn-secondary" onclick="App.prevStep()" disabled>← Назад</button>
-      <button id="btn-next" class="btn btn-accent" onclick="App.nextStep()">Далее →</button>
-    </div>
   </div>
 
   <!-- 3. МОИ ЗАЯВКИ -->
@@ -353,6 +350,13 @@
 
     <div id="requests-loading" class="loading hidden">
       <div class="loading-spinner"></div>
+    </div>
+
+    <div id="requests-error" class="empty-state data-load-error hidden" role="alert">
+      <div class="empty-icon" aria-hidden="true">!</div>
+      <h3>Не удалось загрузить заявки</h3>
+      <p>Проверь подключение и попробуй ещё раз.</p>
+      <button class="btn btn-secondary full-width" onclick="App.openMyRequests()">Повторить</button>
     </div>
 
     <div id="requests-empty" class="empty-state hidden">
@@ -458,21 +462,33 @@
     </div>
 
     <div class="calendar-nav">
-      <button class="btn-icon calendar-nav-btn" id="cal-prev" onclick="App.prevMonth()">◀</button>
-      <h3 id="calendar-month-year"></h3>
-      <button class="btn-icon calendar-nav-btn" id="cal-next" onclick="App.nextMonth()">▶</button>
+      <button class="btn-icon calendar-nav-btn" id="cal-prev" aria-label="Предыдущий месяц" onclick="App.prevMonth()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+      <h3 id="calendar-month-year" aria-live="polite"></h3>
+      <button class="btn-icon calendar-nav-btn" id="cal-next" aria-label="Следующий месяц" onclick="App.nextMonth()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
     </div>
 
-    <div class="calendar-grid-header">
+    <div id="calendar-loading" class="calendar-state calendar-state-loading hidden" role="status" aria-live="polite">
+      <span class="calendar-state-spinner" aria-hidden="true"></span>
+      <p>Загружаем расписание…</p>
+    </div>
+
+    <div id="calendar-error" class="calendar-state calendar-state-error hidden" role="alert">
+      <span class="calendar-state-icon" aria-hidden="true">!</span>
+      <h3>Не удалось загрузить расписание</h3>
+      <p>Проверь подключение и попробуй ещё раз.</p>
+      <button class="btn btn-secondary" onclick="App.openCalendar()">Повторить</button>
+    </div>
+
+    <div id="calendar-grid-header" class="calendar-grid-header hidden">
       <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
     </div>
-    <div id="calendar-grid" class="calendar-grid"></div>
+    <div id="calendar-grid" class="calendar-grid hidden"></div>
 
     <div id="calendar-master-hint" class="calendar-master-hint hidden">
       <p id="calendar-master-hint-text">Нажми на день, чтобы открыть или закрыть его для записи.</p>
     </div>
 
-     <div class="calendar-legend">
+     <div id="calendar-legend" class="calendar-legend hidden">
       <div class="legend-item">
         <span class="legend-dot legend-free"></span>
         <span>Свободно</span>
@@ -487,7 +503,7 @@
       </div>
       <div class="legend-item">
         <span class="legend-dot legend-closed"></span>
-        <span>Закрыто</span>
+        <span>Недоступно</span>
       </div>
     </div>
 
@@ -538,6 +554,7 @@
     <section id="master-requests-panel" class="master-panel detail-section">
       <div class="section-heading"><div><h3>Входящие заявки</h3><p class="section-note">Здесь появляются новые клиенты и текущие записи.</p></div></div>
       <div id="master-loading" class="loading hidden"><div class="loading-spinner"></div></div>
+      <div id="master-error" class="empty-state data-load-error hidden" role="alert"><div class="empty-icon" aria-hidden="true">!</div><h3>Не удалось загрузить заявки</h3><p>Проверь подключение и попробуй ещё раз.</p><button class="btn btn-secondary" onclick="App.openMasterCabinet()">Повторить</button></div>
       <div id="master-empty" class="empty-state hidden"><div class="empty-icon">✦</div><h3>Новых заявок нет</h3><p>Все обращения разобраны.</p></div>
       <div id="master-list" class="requests-list"></div>
     </section>
@@ -547,15 +564,24 @@
       <form id="portfolio-form" class="portfolio-admin-form hidden" onsubmit="App.savePortfolioItem(event)">
         <h4 id="portfolio-form-title">Добавить работу</h4>
         <label>Название<input id="portfolio-title" required maxlength="120"></label>
-         <label>Папка<input id="portfolio-place" required maxlength="120" placeholder="Например: графика, цвет, ботаника"></label>
-         <label>Описание и настроение<input id="portfolio-tags" placeholder="Что изображено и какое у него настроение"></label>
+         <label>Место на теле<input id="portfolio-place" required maxlength="120" placeholder="Например: предплечье, плечо, бедро"></label>
+         <label>Папка<input id="portfolio-folder" required maxlength="80" placeholder="Например: графика, цвет, ботаника"></label>
+         <fieldset class="portfolio-category-field"><legend>Категории для фильтра</legend><div class="portfolio-category-options">
+           <label><input type="checkbox" name="portfolio-category" value="graphic"> Графика</label>
+           <label><input type="checkbox" name="portfolio-category" value="color"> Цвет</label>
+           <label><input type="checkbox" name="portfolio-category" value="black"> Чёрное</label>
+           <label><input type="checkbox" name="portfolio-category" value="botanical"> Ботаника</label>
+         </div></fieldset>
+         <label>Описание и настроение<input id="portfolio-tags" placeholder="Например: тонкие линии, спокойное настроение"></label>
          <div id="portfolio-folder-suggestions" class="folder-suggestions"></div>
          <label class="portfolio-url-field">URL изображения<input id="portfolio-image-url" placeholder="Не нужно, если загружаешь файл"></label>
-        <label>Загрузить файл<input id="portfolio-image" type="file" accept="image/jpeg,image/png,image/webp"></label>
+        <label>Загрузить фото работы<input id="portfolio-image" type="file" accept="image/jpeg,image/png,image/webp"></label>
+        <small class="portfolio-image-hint">Опубликованная работа должна содержать фото или ссылку на изображение.</small>
         <label>Порядок<input id="portfolio-sort" type="number" value="0"></label>
-        <label class="portfolio-check"><input id="portfolio-published" type="checkbox" checked> Опубликована</label>
+        <label class="portfolio-check"><input id="portfolio-published" type="checkbox"> Опубликовать после сохранения</label>
         <div class="portfolio-form-actions"><button type="submit" class="btn btn-accent">Сохранить</button><button type="button" class="btn btn-secondary" onclick="document.getElementById('portfolio-form').classList.add('hidden')">Отмена</button></div>
       </form>
+      <div id="master-portfolio-error" class="data-load-error inline-load-error hidden" role="alert"><p>Не удалось обновить портфолио.</p><button class="btn btn-secondary" onclick="App.openMasterCabinet()">Повторить</button></div>
       <div id="admin-portfolio-list" class="admin-portfolio-list"></div>
     </section>
 
@@ -567,24 +593,24 @@
   <!-- Нижняя навигация -->
   <nav id="bottom-nav" class="bottom-nav hidden">
     <button class="nav-item active" data-screen="screen-home" onclick="App.goHome()">
-      <span class="nav-icon" aria-hidden="true">⌂</span>
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10Z"/></svg></span>
       <span class="nav-label">Главная</span>
     </button>
     <button class="nav-item" data-screen="screen-request-form" onclick="App.navNewRequest()">
-      <span class="nav-icon" aria-hidden="true">＋</span>
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
       <span class="nav-label">Заявка</span>
     </button>
     <button class="nav-item" data-screen="screen-portfolio" onclick="App.openPortfolio()">
-      <span class="nav-icon" aria-hidden="true">▧</span>
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m5 18 5-5 3 3 2-2 4 4"/></svg></span>
       <span class="nav-label">Работы</span>
     </button>
     <button class="nav-item" data-screen="screen-my-requests" onclick="App.openMyRequests()">
-      <span class="nav-icon" aria-hidden="true">◷</span>
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 6h14M7 12h14M7 18h14"/><circle cx="3.5" cy="6" r=".6"/><circle cx="3.5" cy="12" r=".6"/><circle cx="3.5" cy="18" r=".6"/></svg></span>
       <span class="nav-label">Заявки</span>
     </button>
   </nav>
 
-  <div id="intro-overlay" class="intro-overlay" aria-hidden="true">
+  <div id="intro-overlay" class="intro-overlay hidden" aria-hidden="true">
     <div class="intro-word">KELL</div>
     <div class="intro-images"><img class="intro-sketch" src="assets/portfolio/intro-sketch.jpg" alt=""><img class="intro-stencil" src="assets/portfolio/intro-stencil.jpg" alt=""><img class="intro-final" src="assets/portfolio/intro-final.jpg" alt=""></div>
     <div class="intro-caption">
@@ -613,6 +639,6 @@
     <span class="archive-undo-timer" aria-hidden="true"></span>
   </div>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

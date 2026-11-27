@@ -292,12 +292,14 @@ class AdminDashboard(BaseModel):
 class PortfolioItemCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     place: str = Field(min_length=1, max_length=120)
+    folder: str = Field(default="Без папки", min_length=1, max_length=80)
     image_url: str | None = Field(default=None, max_length=500)
+    categories: list[Literal["graphic", "color", "black", "botanical"]] = Field(default_factory=list, max_length=4)
     tags: list[str] = Field(default_factory=list, max_length=12)
-    is_published: bool = True
+    is_published: bool = False
     sort_order: int = Field(default=0, ge=-100000, le=100000)
 
-    @field_validator("title", "place")
+    @field_validator("title", "place", "folder")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()
@@ -334,12 +336,14 @@ class PortfolioItemCreate(BaseModel):
 class PortfolioItemUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     place: str | None = Field(default=None, min_length=1, max_length=120)
+    folder: str | None = Field(default=None, min_length=1, max_length=80)
     image_url: str | None = Field(default=None, max_length=500)
+    categories: list[Literal["graphic", "color", "black", "botanical"]] | None = Field(default=None, max_length=4)
     tags: list[str] | None = Field(default=None, max_length=12)
     is_published: bool | None = None
     sort_order: int | None = Field(default=None, ge=-100000, le=100000)
 
-    @field_validator("title", "place")
+    @field_validator("title", "place", "folder")
     @classmethod
     def strip_optional_text(cls, value: str | None) -> str | None:
         return value.strip() if value is not None else None
@@ -376,7 +380,9 @@ class PortfolioItemOut(BaseModel):
     id: int
     title: str
     place: str
+    folder: str = "Без папки"
     image_url: str | None = None
+    categories: list[str]
     tags: list[str]
     is_published: bool
     sort_order: int
@@ -387,3 +393,16 @@ class PortfolioItemOut(BaseModel):
 class PortfolioItemAdminOut(PortfolioItemOut):
     has_uploaded_image: bool = False
     image_content_type: str | None = None
+
+
+class PortfolioFolderRename(BaseModel):
+    old_folder: str = Field(min_length=1, max_length=80)
+    new_folder: str = Field(min_length=1, max_length=80)
+
+    @field_validator("old_folder", "new_folder")
+    @classmethod
+    def strip_folder_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Название папки не может быть пустым")
+        return value

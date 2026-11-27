@@ -16,11 +16,15 @@ from app.schemas import (
     PortfolioItemCreate,
     PortfolioItemOut,
     PortfolioItemUpdate,
+    PortfolioFolderRename,
 )
 
 router = APIRouter(tags=["portfolio"])
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+PUBLISH_IMAGE_REQUIRED = (
+    "Чтобы опубликовать работу, добавьте изображение или укажите его URL."
+)
 
 
 def _image_signature_matches(content_type: str, content: bytes) -> bool:
@@ -60,6 +64,15 @@ def _admin_out(item: PortfolioItem) -> PortfolioItemAdminOut:
     )
 
 
+def _ensure_publishable(
+    is_published: bool,
+    image_url: str | None,
+    has_uploaded_image: bool = False,
+) -> None:
+    if is_published and not ((image_url or "").strip() or has_uploaded_image):
+        raise HTTPException(status_code=422, detail=PUBLISH_IMAGE_REQUIRED)
+
+
 @router.get("/portfolio", response_model=list[PortfolioItemOut])
 async def list_public_portfolio(session: AsyncSession = Depends(get_db)):
     result = await session.execute(_public_query())
@@ -84,6 +97,28 @@ async def get_portfolio_image(item_id: int, session: AsyncSession = Depends(get_
     )
 
 
+@router.get("/admin/portfolio/{item_id}/image")
+async def get_admin_portfolio_image(
+    item_id: int,
+    session: AsyncSession = Depends(get_db),
+    _admin: dict = Depends(admin_only),
+):
+    item = (
+        await session.execute(
+            select(PortfolioItem)
+            .where(PortfolioItem.id == item_id)
+            .options(undefer(PortfolioItem.image_data))
+        )
+    ).scalar_one_or_none()
+    if item is None or item.image_data is None:
+        raise HTTPException(status_code=404, detail="Изображение не найдено")
+    return Response(
+        content=item.image_data,
+        media_type=item.image_content_type or "image/jpeg",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @router.get("/admin/portfolio", response_model=list[PortfolioItemAdminOut])
 async def list_admin_portfolio(
     session: AsyncSession = Depends(get_db),
@@ -91,6 +126,43 @@ async def list_admin_portfolio(
 ):
     result = await session.execute(_admin_query())
     return [_admin_out(item) for item in result.scalars().all()]
+
+
+@router.get("/admin/portfolio/folders", response_model=list[str])
+async def list_portfolio_folders(
+    session: AsyncSession = Depends(get_db),
+    _admin: dict = Depends(admin_only),
+):
+    result = await session.execute(
+        select(PortfolioItem.folder).distinct().order_by(PortfolioItem.folder.asc())
+    )
+    return result.scalars().all()
+
+
+@router.patch("/admin/portfolio/folders/rename", response_model=list[str])
+async def rename_portfolio_folder(
+    data: PortfolioFolderRename,
+    session: AsyncSession = Depends(get_db),
+    _admin: dict = Depends(admin_only),
+):
+    if data.old_folder == data.new_folder:
+        return await list_portfolio_folders(session, _admin)
+    existing = await session.scalar(
+        select(PortfolioItem.id).where(PortfolioItem.folder == data.new_folder).limit(1)
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Папка с таким названием уже есть")
+    items = (
+        await session.execute(
+            select(PortfolioItem).where(PortfolioItem.folder == data.old_folder)
+        )
+    ).scalars().all()
+    if not items:
+        raise HTTPException(status_code=404, detail="Папка не найдена")
+    for item in items:
+        item.folder = data.new_folder
+    await session.commit()
+    return await list_portfolio_folders(session, _admin)
 
 
 @router.post(
@@ -103,6 +175,7 @@ async def create_portfolio_item(
     session: AsyncSession = Depends(get_db),
     _admin: dict = Depends(admin_only),
 ):
+    _ensure_publishable(data.is_published, data.image_url)
     item = PortfolioItem(**data.model_dump())
     session.add(item)
     await session.commit()
@@ -120,7 +193,21 @@ async def update_portfolio_item(
     item = await session.get(PortfolioItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Работа не найдена")
-    for key, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    next_is_published = changes.get("is_published", item.is_published)
+    next_image_url = changes.get("image_url", item.image_url)
+    has_uploaded_image = False
+    if next_is_published and not (next_image_url or "").strip():
+        uploaded_image_id = await session.scalar(
+            select(PortfolioItem.id).where(
+                PortfolioItem.id == item_id,
+                PortfolioItem.image_data.is_not(None),
+                PortfolioItem.image_content_type.is_not(None),
+            )
+        )
+        has_uploaded_image = uploaded_image_id is not None
+    _ensure_publishable(next_is_published, next_image_url, has_uploaded_image)
+    for key, value in changes.items():
         setattr(item, key, value)
     await session.commit()
     await session.refresh(item)

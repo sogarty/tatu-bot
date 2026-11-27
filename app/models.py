@@ -454,19 +454,28 @@ class PortfolioItem(Base):
 
     __table_args__ = (
         Index("ix_portfolio_item_published_sort", "is_published", "sort_order"),
+        CheckConstraint(
+            "is_published = false "
+            "OR (image_url IS NOT NULL AND trim(image_url) <> '') "
+            "OR (image_data IS NOT NULL AND image_content_type IS NOT NULL "
+            "AND trim(image_content_type) <> '')",
+            name="ck_portfolio_item_published_requires_image",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     place: Mapped[str] = mapped_column(String(120), nullable=False)
+    folder: Mapped[str] = mapped_column(String(80), nullable=False, default="Без папки")
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     image_data: Mapped[bytes | None] = mapped_column(
         LargeBinary, nullable=True, deferred=True
     )
     image_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    categories: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     is_published: Mapped[bool] = mapped_column(
-        Boolean, server_default=true(), nullable=False
+        Boolean, server_default=false(), nullable=False
     )
     sort_order: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(

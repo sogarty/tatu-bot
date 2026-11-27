@@ -15,33 +15,33 @@ const API_BASE = '/api/v1/';
 const MASTER_TELEGRAM = 'https://t.me/aritu_tattoo';
 
 const STATUS_MAP = {
-  draft:       { text: 'Черновик',   icon: '📝', cssClass: 'new' },
-  new:         { text: 'В очереди',  icon: '⏳', cssClass: 'new' },
-  accepted:    { text: 'Принята',    icon: '✅', cssClass: 'accepted' },
-  in_progress: { text: 'Создаётся',  icon: '🖌',  cssClass: 'in_progress' },
-  scheduled:   { text: 'Записана',   icon: '📅', cssClass: 'scheduled' },
-  completed:   { text: 'Завершена',  icon: '✨', cssClass: 'completed' },
-  rejected:    { text: 'Отклонена',  icon: '❌', cssClass: 'rejected' },
-  cancelled:   { text: 'Отменена',   icon: '🚫', cssClass: 'rejected' },
+  draft:       { text: 'Черновик',   icon: '○', cssClass: 'new' },
+  new:         { text: 'В очереди',  icon: '◷', cssClass: 'new' },
+  accepted:    { text: 'Принята',    icon: '✓', cssClass: 'accepted' },
+  in_progress: { text: 'Создаётся',  icon: '✦', cssClass: 'in_progress' },
+  scheduled:   { text: 'Записана',   icon: '▣', cssClass: 'scheduled' },
+  completed:   { text: 'Завершена',  icon: '✳', cssClass: 'completed' },
+  rejected:    { text: 'Отклонена',  icon: '×', cssClass: 'rejected' },
+  cancelled:   { text: 'Отменена',   icon: '—', cssClass: 'rejected' },
 };
 
 const PORTFOLIO_WORKS = [
-  { id: 'k01', title: 'Пион', place: 'Бедро', tags: ['color', 'botanical'] },
-  { id: 'k02', title: 'Любовь', place: 'Кожа', tags: ['graphic'] },
-  { id: 'k03', title: 'Ботаника', place: 'Предплечье', tags: ['graphic', 'botanical'] },
-  { id: 'k04', title: 'Фея', place: 'Плечо', tags: ['graphic'] },
-  { id: 'k05', title: 'Птица и лилии', place: 'Спина', tags: ['color', 'botanical'] },
-  { id: 'k06', title: 'Пион и жуки', place: 'Плечо', tags: ['color', 'botanical'] },
-  { id: 'k07', title: 'Осенние цветы', place: 'Рука', tags: ['color', 'botanical'] },
-  { id: 'k08', title: 'Паук и линии', place: 'Грудь', tags: ['graphic'] },
-  { id: 'k09', title: 'Стебли', place: 'Бок', tags: ['graphic', 'botanical'] },
-  { id: 'k10', title: 'Тонкая линия', place: 'Талия', tags: ['graphic'] },
-  { id: 'k11', title: 'Орнаментальный рукав', place: 'Рука', tags: ['black'] },
-  { id: 'k12', title: 'Чёрный рукав', place: 'Рука', tags: ['black'] },
-  { id: 'k13', title: 'Чёрный зверь', place: 'Нога', tags: ['black'] },
-  { id: 'k14', title: 'Пантера', place: 'Бедро', tags: ['black'] },
-  { id: 'k15', title: 'Ветвь', place: 'Рука', tags: ['graphic', 'botanical'] },
-  { id: 'k16', title: 'Леттеринг', place: 'Предплечье', tags: ['graphic'] },
+  { id: 'k01', title: 'Пион', place: 'Бедро', categories: ['color', 'botanical'], tags: ['цветочная композиция'] },
+  { id: 'k02', title: 'Любовь', place: 'Кожа', categories: ['graphic'], tags: ['тонкая линия'] },
+  { id: 'k03', title: 'Ботаника', place: 'Предплечье', categories: ['graphic', 'botanical'], tags: ['растительный мотив'] },
+  { id: 'k04', title: 'Фея', place: 'Плечо', categories: ['graphic'], tags: ['иллюстрация'] },
+  { id: 'k05', title: 'Птица и лилии', place: 'Спина', categories: ['color', 'botanical'], tags: ['лилии', 'птицы'] },
+  { id: 'k06', title: 'Пион и жуки', place: 'Плечо', categories: ['color', 'botanical'], tags: ['цветочная композиция'] },
+  { id: 'k07', title: 'Осенние цветы', place: 'Рука', categories: ['color', 'botanical'], tags: ['осенний мотив'] },
+  { id: 'k08', title: 'Паук и линии', place: 'Грудь', categories: ['graphic'], tags: ['контур'] },
+  { id: 'k09', title: 'Стебли', place: 'Бок', categories: ['graphic', 'botanical'], tags: ['растительный мотив'] },
+  { id: 'k10', title: 'Тонкая линия', place: 'Талия', categories: ['graphic'], tags: ['минимализм'] },
+  { id: 'k11', title: 'Орнаментальный рукав', place: 'Рука', categories: ['black'], tags: ['орнамент'] },
+  { id: 'k12', title: 'Крылья и хризантема', place: 'Рука', categories: ['black', 'botanical'], tags: ['японский мотив'] },
+  { id: 'k13', title: 'Чёрный зверь', place: 'Нога', categories: ['black'], tags: ['животные'] },
+  { id: 'k14', title: 'Пятнистая кошка', place: 'Бедро', categories: ['black'], tags: ['животные', 'орнамент'] },
+  { id: 'k15', title: 'Ветвь', place: 'Рука', categories: ['graphic', 'botanical'], tags: ['растительный мотив'] },
+  { id: 'k16', title: 'Леттеринг', place: 'Предплечье', categories: ['graphic'], tags: ['надпись'] },
 ];
 
 const COLOR_LABELS = { bw: 'Чёрно-белая', color: 'Цветная' };
@@ -107,6 +107,8 @@ const state = {
   calendarYear: new Date().getFullYear(),
   calendarMonth: new Date().getMonth(),
   calendarSlots: {},
+  calendarLoadState: 'idle',
+  calendarLoadGeneration: 0,
   lastRequestId: null,
   pendingScheduleId: null,
   sessionRefreshPromise: null,
@@ -116,6 +118,7 @@ const state = {
   portfolioLoaded: false,
   adminPortfolio: [],
   editingPortfolioId: null,
+  pendingPortfolioDraftId: null,
   referenceFiles: [],
   referenceObjectUrls: new Map(),
   referenceUploadRequestId: null,
@@ -344,6 +347,9 @@ function updateClientOnlyControls() {
 }
 
 function portfolioImageUrl(work) {
+  if (!work.image_url && work.has_uploaded_image) {
+    return `${API_BASE}portfolio/${encodeURIComponent(work.id)}/image`;
+  }
   return work.image_url || `assets/portfolio/${work.id}.jpg`;
 }
 
@@ -358,7 +364,7 @@ function renderPortfolio(filter = 'all') {
   const grid = document.getElementById('portfolio-grid');
   if (!grid) return;
   const source = state.portfolioLoaded ? state.portfolio : PORTFOLIO_WORKS;
-  const works = filter === 'all' ? source : source.filter((work) => (work.tags || []).includes(filter));
+  const works = filter === 'all' ? source : source.filter((work) => (work.categories || []).includes(filter));
   grid.innerHTML = works.map((work) => `
     <button class="portfolio-tile" data-portfolio-preview="${escapeHtml(String(work.id))}" aria-label="Открыть ${escapeHtml(work.title)}">
       <img src="${escapeHtml(portfolioImageUrl(work))}" alt="${escapeHtml(work.title)} на теле, ${escapeHtml(work.place)}" loading="lazy">
@@ -416,6 +422,7 @@ function closeIntro() {
   if (!intro) return;
   intro.classList.add('intro-closing');
   intro.classList.remove('intro-playing');
+  intro.setAttribute('aria-hidden', 'true');
   try { sessionStorage.setItem('tatu.intro.seen', '1'); } catch (e) { /* storage can be unavailable */ }
   setTimeout(() => {
     intro.classList.add('hidden');
@@ -427,6 +434,7 @@ function playIntro() {
   const intro = document.getElementById('intro-overlay');
   if (!intro) return;
   intro.classList.remove('hidden', 'intro-closing', 'intro-playing');
+  intro.setAttribute('aria-hidden', 'false');
   void intro.offsetWidth;
   intro.classList.add('intro-playing');
   setTimeout(() => intro.classList.contains('hidden') || closeIntro(), 6500);
@@ -1180,17 +1188,19 @@ async function openMyRequests() {
 
   const loading = document.getElementById('requests-loading');
   const empty = document.getElementById('requests-empty');
+  const error = document.getElementById('requests-error');
   const list = document.getElementById('requests-list');
 
   loading.classList.remove('hidden');
   empty.classList.add('hidden');
+  error.classList.add('hidden');
   list.innerHTML = '';
 
   const res = await apiGet('requests');
   loading.classList.add('hidden');
 
   if (!res.ok) {
-    toast(res.error || 'Не удалось загрузить заявки');
+    error.classList.remove('hidden');
     return;
   }
 
@@ -1397,7 +1407,13 @@ function renderCalendar() {
 
   document.getElementById('calendar-month-year').textContent = `${months[month]} ${year}`;
 
+  const isReady = state.calendarLoadState === 'ready';
   const grid = document.getElementById('calendar-grid');
+  grid.classList.toggle('hidden', !isReady);
+  document.getElementById('calendar-grid-header').classList.toggle('hidden', !isReady);
+  document.getElementById('calendar-legend').classList.toggle('hidden', !isReady);
+  document.getElementById('calendar-loading').classList.toggle('hidden', state.calendarLoadState !== 'loading');
+  document.getElementById('calendar-error').classList.toggle('hidden', state.calendarLoadState !== 'error');
   grid.innerHTML = '';
 
   const firstDay = new Date(year, month, 1);
@@ -1415,15 +1431,25 @@ function renderCalendar() {
   }
 
   for (let day = 1; day <= daysInMonth; day++) {
-    const cell = document.createElement('div');
+    const cell = document.createElement('button');
+    cell.type = 'button';
     cell.className = 'calendar-day';
     cell.textContent = day;
 
     const dateStr = isoDate(year, month, day);
     cell.dataset.date = dateStr;
+    const slot = state.calendarSlots[dateStr];
+    const dayStatus = slot?.is_booked
+      ? 'занято записью'
+      : slot && !slot.is_blocked
+        ? 'свободно'
+        : 'недоступно';
+    const spokenDate = new Date(year, month, day).toLocaleDateString('ru-RU', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    });
+    cell.setAttribute('aria-label', `${spokenDate}, ${dayStatus}`);
     if (dateStr === todayStr) cell.classList.add('today');
 
-    const slot = state.calendarSlots[dateStr];
     if (slot?.is_booked) {
       cell.classList.add('busy');
     } else if (slot && !slot.is_blocked) {
@@ -1438,6 +1464,12 @@ function renderCalendar() {
     // Мастер может открыть/закрыть день прямо в календаре.
     if (state.me?.is_admin) {
       cell.classList.add('clickable');
+      cell.setAttribute('aria-pressed', String(Boolean(slot?.is_blocked && !slot?.is_booked)));
+      if (slot?.is_booked) {
+        cell.setAttribute('aria-label', `${spokenDate}, занято записью; изменить день нельзя`);
+      } else {
+        cell.setAttribute('aria-label', `${spokenDate}, ${dayStatus}; нажмите, чтобы ${slot?.is_blocked ? 'открыть' : 'закрыть'} день`);
+      }
       cell.addEventListener('click', () => toggleCalendarDay(dateStr));
     } else {
       cell.addEventListener('click', () => explainCalendarDay(dateStr));
@@ -1448,10 +1480,10 @@ function renderCalendar() {
 
   // Подсказка видна только мастеру
   const hint = document.getElementById('calendar-master-hint');
-  if (hint) hint.classList.toggle('hidden', !state.me?.is_admin);
+  if (hint) hint.classList.toggle('hidden', !isReady || !state.me?.is_admin);
 
   const hasSlots = Object.keys(state.calendarSlots).length > 0;
-  document.getElementById('calendar-empty').classList.toggle('hidden', hasSlots);
+  document.getElementById('calendar-empty').classList.toggle('hidden', !isReady || hasSlots);
 }
 
 async function toggleCalendarDay(dateStr) {
@@ -1497,18 +1529,35 @@ function explainCalendarDay(dateStr) {
 }
 
 async function loadCalendarSlots() {
-  const from = isoDate(state.calendarYear, state.calendarMonth, 1);
-  const lastDay = new Date(state.calendarYear, state.calendarMonth + 1, 0).getDate();
-  const to = isoDate(state.calendarYear, state.calendarMonth, lastDay);
+  const year = state.calendarYear;
+  const month = state.calendarMonth;
+  const generation = ++state.calendarLoadGeneration;
+  const from = isoDate(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const to = isoDate(year, month, lastDay);
+
+  state.calendarLoadState = 'loading';
+  state.calendarSlots = {};
+  renderCalendar();
 
   const res = await apiGet(`slots/availability?start_date=${from}&end_date=${to}`);
 
-  state.calendarSlots = {};
-  if (res.ok && res.data && Array.isArray(res.data.days)) {
-    res.data.days.forEach((d) => {
-      state.calendarSlots[d.date] = d;
-    });
+  // Быстрый переход между месяцами не должен вернуть календарь назад
+  // из-за позднего ответа на предыдущий запрос.
+  if (generation !== state.calendarLoadGeneration) return;
+
+  if (!res.ok || !res.data || !Array.isArray(res.data.days)) {
+    state.calendarLoadState = 'error';
+    state.calendarSlots = {};
+    renderCalendar();
+    return;
   }
+
+  state.calendarSlots = {};
+  res.data.days.forEach((d) => {
+    state.calendarSlots[d.date] = d;
+  });
+  state.calendarLoadState = 'ready';
   renderCalendar();
 }
 
@@ -1525,16 +1574,24 @@ async function openMasterCabinet() {
     return;
   }
 
+  const masterScreen = document.getElementById('screen-master');
+  const currentTab = masterScreen.classList.contains('active')
+    ? document.querySelector('.master-tab.active')?.dataset.masterTab || 'requests'
+    : 'requests';
   showScreen('screen-master');
-  switchMasterTab('requests');
+  switchMasterTab(currentTab);
 
   const loading = document.getElementById('master-loading');
   const empty = document.getElementById('master-empty');
+  const error = document.getElementById('master-error');
+  const portfolioError = document.getElementById('master-portfolio-error');
   const list = document.getElementById('master-list');
   const stats = document.getElementById('master-stats');
 
   loading.classList.remove('hidden');
   empty.classList.add('hidden');
+  error.classList.add('hidden');
+  portfolioError.classList.add('hidden');
   list.innerHTML = '';
   stats.innerHTML = '';
 
@@ -1555,19 +1612,28 @@ async function openMasterCabinet() {
       <div class="detail-item"><span class="detail-label">🖌 В работе</span><span class="detail-value">${d.in_progress_count}</span></div>
       <div class="detail-item"><span class="detail-label">📅 Записаны</span><span class="detail-value">${d.scheduled_count}</span></div>
       <div class="detail-item"><span class="detail-label">✨ Завершены</span><span class="detail-value">${d.completed_count}</span></div>`;
+  } else {
+    stats.innerHTML = `
+      <div class="inline-load-error" role="alert">
+        <p>Не удалось загрузить сводку.</p>
+        <button class="btn btn-secondary" onclick="App.openMasterCabinet()">Повторить</button>
+      </div>`;
   }
 
   if (!reqs.ok) {
-    toast(reqs.error || 'Не удалось загрузить заявки');
-    return;
+    error.classList.remove('hidden');
+  } else {
+    state.masterRequests = Array.isArray(reqs.data) ? reqs.data : [];
   }
-
-  state.masterRequests = Array.isArray(reqs.data) ? reqs.data : [];
 
   if (portfolio.ok && Array.isArray(portfolio.data)) {
     state.adminPortfolio = portfolio.data;
     renderAdminPortfolio();
+  } else {
+    portfolioError.classList.remove('hidden');
   }
+
+  if (!reqs.ok) return;
 
   if (state.masterRequests.length === 0) {
     empty.classList.remove('hidden');
@@ -1587,13 +1653,16 @@ function switchMasterTab(tab) {
 
 function resetPortfolioForm() {
   state.editingPortfolioId = null;
+  state.pendingPortfolioDraftId = null;
   document.getElementById('portfolio-form-title').textContent = 'Добавить работу';
   document.getElementById('portfolio-title').value = '';
   document.getElementById('portfolio-place').value = '';
+  document.getElementById('portfolio-folder').value = '';
   document.getElementById('portfolio-tags').value = '';
+  document.querySelectorAll('input[name="portfolio-category"]').forEach((input) => { input.checked = false; });
   document.getElementById('portfolio-image-url').value = '';
   document.getElementById('portfolio-sort').value = '0';
-  document.getElementById('portfolio-published').checked = true;
+  document.getElementById('portfolio-published').checked = false;
   document.getElementById('portfolio-image').value = '';
   renderFolderSuggestions();
   document.getElementById('portfolio-form').classList.add('hidden');
@@ -1601,10 +1670,15 @@ function resetPortfolioForm() {
 
 function editPortfolioItem(item) {
   state.editingPortfolioId = item.id;
-  document.getElementById('portfolio-form-title').textContent = 'Изменить работу';
+  document.getElementById('portfolio-form-title').textContent =
+    state.pendingPortfolioDraftId === item.id ? 'Завершить добавление' : 'Изменить работу';
   document.getElementById('portfolio-title').value = item.title || '';
   document.getElementById('portfolio-place').value = item.place || '';
+  document.getElementById('portfolio-folder').value = item.folder || 'Без папки';
   document.getElementById('portfolio-tags').value = (item.tags || []).join(', ');
+  document.querySelectorAll('input[name="portfolio-category"]').forEach((input) => {
+    input.checked = (item.categories || []).includes(input.value);
+  });
   document.getElementById('portfolio-image-url').value = item.image_url || '';
   document.getElementById('portfolio-sort').value = item.sort_order ?? 0;
   document.getElementById('portfolio-published').checked = Boolean(item.is_published);
@@ -1615,43 +1689,111 @@ function editPortfolioItem(item) {
 
 function renderFolderSuggestions() {
   const container = document.getElementById('portfolio-folder-suggestions');
-  const input = document.getElementById('portfolio-place');
+  const input = document.getElementById('portfolio-folder');
   if (!container || !input) return;
-  const folders = [...new Set(state.adminPortfolio.map((item) => item.place).filter(Boolean))];
-  container.innerHTML = folders.map((folder) => `<button type="button" class="folder-chip" data-folder="${escapeHtml(folder)}">${escapeHtml(folder)}</button>`).join('');
+  const folders = [...new Set(state.adminPortfolio.map((item) => item.folder).filter(Boolean))];
+  container.innerHTML = folders.map((folder) => `<span class="folder-chip"><button type="button" data-folder="${escapeHtml(folder)}">${escapeHtml(folder)}</button><button type="button" data-rename-folder="${escapeHtml(folder)}" aria-label="Переименовать папку ${escapeHtml(folder)}">✎</button></span>`).join('');
   container.querySelectorAll('[data-folder]').forEach((button) => button.addEventListener('click', () => {
     input.value = button.dataset.folder || '';
+  }));
+  container.querySelectorAll('[data-rename-folder]').forEach((button) => button.addEventListener('click', async () => {
+    const oldFolder = button.dataset.renameFolder || '';
+    const newFolder = window.prompt(`Новое название папки «${oldFolder}»:`, oldFolder)?.trim();
+    if (!newFolder || newFolder === oldFolder) return;
+    const result = await apiFetch('admin/portfolio/folders/rename', {
+      method: 'PATCH',
+      body: JSON.stringify({ old_folder: oldFolder, new_folder: newFolder }),
+    });
+    if (!result.ok) {
+      tgAlert(result.error || 'Не удалось переименовать папку');
+      return;
+    }
+    if (input.value === oldFolder) input.value = newFolder;
+    state.adminPortfolio = state.adminPortfolio.map((item) =>
+      item.folder === oldFolder ? { ...item, folder: newFolder } : item
+    );
+    renderAdminPortfolio();
+    toast('Папка переименована');
   }));
 }
 
 async function savePortfolioItem(event) {
   event.preventDefault();
+  const file = document.getElementById('portfolio-image').files[0];
+  const desiredPublished = document.getElementById('portfolio-published').checked;
+  const editing = state.editingPortfolioId;
+  const continuingNewDraft = Boolean(
+    editing && state.pendingPortfolioDraftId === editing
+  );
+  const existingItem = editing
+    ? state.adminPortfolio.find((item) => item.id === editing)
+    : null;
   const payload = {
     title: document.getElementById('portfolio-title').value.trim(),
     place: document.getElementById('portfolio-place').value.trim(),
+    folder: document.getElementById('portfolio-folder').value.trim() || 'Без папки',
     tags: document.getElementById('portfolio-tags').value.split(',').map((tag) => tag.trim()).filter(Boolean),
+    categories: [...document.querySelectorAll('input[name="portfolio-category"]:checked')].map((input) => input.value),
     image_url: document.getElementById('portfolio-image-url').value.trim() || null,
     sort_order: Number(document.getElementById('portfolio-sort').value || 0),
-    is_published: document.getElementById('portfolio-published').checked,
+    is_published: desiredPublished,
   };
-  const editing = state.editingPortfolioId;
+  const hasExistingImage = Boolean(payload.image_url || existingItem?.has_uploaded_image);
+  if (desiredPublished && !hasExistingImage && !file) {
+    tgAlert('Чтобы опубликовать работу, добавьте фото или укажите ссылку на изображение.');
+    return;
+  }
+
+  // A new upload has no usable public URL until the server has stored it.
+  // Save it hidden, upload the image, and publish only after that succeeds.
+  const publishAfterUpload = desiredPublished && Boolean(file) && !hasExistingImage;
+  const savePayload = {
+    ...payload,
+    is_published: publishAfterUpload ? false : desiredPublished,
+  };
   const res = editing
-    ? await apiFetch(`admin/portfolio/${editing}`, { method: 'PATCH', body: JSON.stringify(payload) })
-    : await apiPost('admin/portfolio', payload);
+    ? await apiFetch(`admin/portfolio/${editing}`, { method: 'PATCH', body: JSON.stringify(savePayload) })
+    : await apiPost('admin/portfolio', savePayload);
   if (!res.ok) {
     tgAlert(res.error || 'Не удалось сохранить работу');
     return;
   }
-  const file = document.getElementById('portfolio-image').files[0];
+  const itemId = res.data.id;
+  state.editingPortfolioId = itemId;
+  if (!editing) {
+    state.pendingPortfolioDraftId = itemId;
+    document.getElementById('portfolio-form-title').textContent = 'Завершить добавление';
+  }
   if (file) {
     const form = new FormData();
     form.append('image', file);
-    const upload = await apiUpload(`admin/portfolio/${res.data.id}/image`, form);
+    const upload = await apiUpload(`admin/portfolio/${itemId}/image`, form);
     if (!upload.ok) {
-      tgAlert(upload.error || 'Работа сохранена, но изображение не загрузилось');
+      await loadAdminPortfolio();
+      const statusMessage = desiredPublished && hasExistingImage
+        ? 'Работа сохранена с указанным источником изображения, но новый файл не загрузился.'
+        : 'Работа сохранена скрытой, но фото не загрузилось.';
+      tgAlert(`${statusMessage} ${upload.error || 'Выберите другой файл и нажмите «Сохранить» ещё раз.'}`);
+      return;
+    }
+    revokePortfolioObjectUrl(itemId);
+  }
+  if (publishAfterUpload) {
+    const publication = await apiFetch(`admin/portfolio/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_published: true }),
+    });
+    if (!publication.ok) {
+      await loadAdminPortfolio();
+      tgAlert(`Фото загружено, работа осталась скрытой. ${publication.error || 'Повторите публикацию позже.'}`);
+      return;
     }
   }
-  toast(editing ? 'Работа обновлена' : 'Работа добавлена');
+  const isNewWork = !editing || continuingNewDraft;
+  toast(isNewWork
+    ? (desiredPublished ? 'Работа опубликована' : 'Работа добавлена скрытой')
+    : 'Работа обновлена');
+  if (isNewWork) state.pendingPortfolioDraftId = null;
   document.getElementById('portfolio-form').classList.add('hidden');
   await loadAdminPortfolio();
   await loadPortfolio(true);
@@ -1673,8 +1815,12 @@ function renderAdminPortfolio() {
   if (!list) return;
   list.innerHTML = state.adminPortfolio.map((item) => `
     <div class="admin-portfolio-row">
-      <img src="${escapeHtml(portfolioImageUrl(item))}" alt="">
-      <div class="admin-portfolio-copy"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.place)} · ${escapeHtml((item.tags || []).join(', '))}</span><small>${item.is_published ? 'Опубликована' : 'Скрыта'}${item.has_uploaded_image ? ' · файл в БД' : ''}</small></div>
+      ${item.has_uploaded_image
+        ? `<div class="admin-portfolio-placeholder" data-portfolio-image="${item.id}" role="img" aria-label="Загрузка фото"></div>`
+        : item.image_url
+          ? `<img src="${escapeHtml(portfolioImageUrl(item))}" alt="">`
+        : '<div class="admin-portfolio-placeholder" aria-label="Фото не загружено">Фото не загружено</div>'}
+      <div class="admin-portfolio-copy"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.folder || 'Без папки')} · ${escapeHtml(item.place)} · ${escapeHtml((item.tags || []).join(', '))}</span><small>${item.is_published ? 'Опубликована' : 'Скрыта'}${item.has_uploaded_image ? ' · файл в БД' : ''}</small></div>
       <div class="admin-portfolio-actions"><button class="btn btn-secondary" data-portfolio-edit="${item.id}">Изменить</button><button class="btn btn-secondary" data-portfolio-toggle="${item.id}">${item.is_published ? 'Скрыть' : 'Опубликовать'}</button><button class="btn btn-danger" data-portfolio-delete="${item.id}">Удалить</button></div>
     </div>`).join('');
   list.querySelectorAll('[data-portfolio-edit]').forEach((button) => button.addEventListener('click', () => {
@@ -1684,6 +1830,53 @@ function renderAdminPortfolio() {
   list.querySelectorAll('[data-portfolio-toggle]').forEach((button) => button.addEventListener('click', () => togglePortfolioItem(Number(button.dataset.portfolioToggle))));
   list.querySelectorAll('[data-portfolio-delete]').forEach((button) => button.addEventListener('click', () => deletePortfolioItem(Number(button.dataset.portfolioDelete))));
   renderFolderSuggestions();
+  loadAdminPortfolioThumbs();
+}
+
+async function loadAdminPortfolioThumbs() {
+  const list = document.getElementById('admin-portfolio-list');
+  if (!list) return;
+  const placeholders = [...list.querySelectorAll('[data-portfolio-image]')];
+  await Promise.all(placeholders.map(async (placeholder) => {
+    const id = Number(placeholder.dataset.portfolioImage);
+    if (!id || !placeholder.isConnected) return;
+    let url = state.portfolioObjectUrls.get(id);
+    if (!url) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const response = await fetch(`${API_BASE}admin/portfolio/${id}/image`, {
+          headers: authHeader(),
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          placeholder.textContent = 'Фото не загрузилось';
+          placeholder.setAttribute('aria-label', 'Фото не загрузилось');
+          return;
+        }
+        url = URL.createObjectURL(await response.blob());
+        state.portfolioObjectUrls.set(id, url);
+      } catch (error) {
+        placeholder.textContent = 'Фото не загрузилось';
+        placeholder.setAttribute('aria-label', 'Фото не загрузилось');
+        return;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    if (!placeholder.isConnected) return;
+    const image = document.createElement('img');
+    image.src = url;
+    image.alt = '';
+    placeholder.replaceWith(image);
+  }));
+}
+
+function revokePortfolioObjectUrl(id) {
+  const url = state.portfolioObjectUrls.get(id);
+  if (!url) return;
+  URL.revokeObjectURL(url);
+  state.portfolioObjectUrls.delete(id);
 }
 
 async function togglePortfolioItem(id) {
@@ -1700,6 +1893,7 @@ async function deletePortfolioItem(id) {
   if (!confirm('Удалить эту работу?')) return;
   const res = await apiFetch(`admin/portfolio/${id}`, { method: 'DELETE' });
   if (!res.ok) { tgAlert(res.error || 'Не удалось удалить работу'); return; }
+  revokePortfolioObjectUrl(id);
   toast('Работа удалена');
   await loadAdminPortfolio();
   await loadPortfolio(true);

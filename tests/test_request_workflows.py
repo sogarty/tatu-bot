@@ -6,6 +6,8 @@ import asyncio
 from datetime import date
 
 import pytest
+from fastapi import BackgroundTasks
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.bot.services.queue_service import get_queue_position
@@ -16,7 +18,11 @@ from app.bot.services.request_service import (
 )
 from app.dependencies import InvalidTransitionError
 from app.models import Appointment, Base, MasterSlot, TattooRequest, TgUser
-from app.routers.requests import restore_from_trash
+from app.routers.requests import (
+    SchedulePayload,
+    restore_from_trash,
+    schedule_request,
+)
 
 
 def run(coro):
@@ -112,7 +118,7 @@ def test_cancel_and_complete_require_scheduled_confirmed_appointment():
     run(scenario())
 
 
-def test_cancelled_appointment_can_be_reused_for_rescheduling():
+def test_cancelled_appointment_can_be_reused_by_schedule_endpoint():
     async def scenario():
         engine, factory = await make_session()
         async with factory() as session:
@@ -131,16 +137,26 @@ def test_cancelled_appointment_can_be_reused_for_rescheduling():
             await session.flush()
             await transition_status(session, request.id, "scheduled")
             await cancel_appointment(session, request.id)
-            await session.flush()
-
-            appointment.status = "confirmed"
-            await session.flush()
             await transition_status(session, request.id, "accepted")
             await transition_status(session, request.id, "in_progress")
-            await transition_status(session, request.id, "scheduled")
 
-            assert request.status == "scheduled"
+            # Exercise the endpoint that used to INSERT a second appointment
+            # and fail UNIQUE(appointment.request_id) after a cancellation.
+            scheduled = await schedule_request(
+                request.id,
+                SchedulePayload(slot_date="2026-12-12"),
+                BackgroundTasks(),
+                session,
+                {"user_id": 42, "is_admin": True},
+            )
+
+            assert scheduled.status == "scheduled"
             assert appointment.status == "confirmed"
+            assert appointment.slot.slot_date == date(2026, 12, 12)
+            appointment_count = await session.scalar(
+                select(func.count()).select_from(Appointment)
+            )
+            assert appointment_count == 1
         await engine.dispose()
 
     run(scenario())

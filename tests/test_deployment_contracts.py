@@ -31,7 +31,7 @@ def test_alembic_head_applies_idempotency_schema(tmp_path):
         "from alembic import command; "
         "config = Config('alembic.ini'); "
         "config.set_main_option('script_location', 'alembic'); "
-        "command.upgrade(config, 'head')"
+        "command.upgrade(config, '008')"
     )
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -43,10 +43,36 @@ def test_alembic_head_applies_idempotency_schema(tmp_path):
     )
     assert result.returncode == 0, result.stderr
 
+    # Simulate a record created by the old API: published, but with no image.
     with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "008",
+        connection.execute(
+            "INSERT INTO portfolio_item "
+            "(title, place, image_url, image_data, image_content_type, tags, "
+            "is_published, sort_order, created_at, updated_at) "
+            "VALUES (?, ?, NULL, NULL, NULL, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            ("Старая работа без фото", "Рука", "[]", 100),
         )
+        connection.commit()
+
+    upgrade_script = (
+        "from alembic.config import Config; "
+        "from alembic import command; "
+        "config = Config('alembic.ini'); "
+        "config.set_main_option('script_location', 'alembic'); "
+        "command.upgrade(config, 'head')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", upgrade_script],
+        cwd=os.path.dirname(os.path.dirname(__file__)),
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("011",)
         columns = {
             row[1] for row in connection.execute("PRAGMA table_info(tattoo_request)")
         }
@@ -71,6 +97,22 @@ def test_alembic_head_applies_idempotency_schema(tmp_path):
             "assets/portfolio/k12.jpg": "Крылья и хризантема",
             "assets/portfolio/k14.jpg": "Пятнистая кошка",
         }
+        assert connection.execute(
+            "SELECT categories FROM portfolio_item WHERE image_url = ?",
+            ("assets/portfolio/k12.jpg",),
+        ).fetchone() == ('["black"]',)
+        assert connection.execute(
+            "SELECT is_published FROM portfolio_item WHERE title = ?",
+            ("Старая работа без фото",),
+        ).fetchone() == (0,)
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO portfolio_item "
+                "(title, place, image_url, image_data, image_content_type, tags, "
+                "is_published, sort_order, created_at, updated_at) "
+                "VALUES (?, ?, NULL, NULL, NULL, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                ("Запись без фото", "Рука", "[]", 101),
+            )
 
 
 def test_health_requires_webhook_readiness(monkeypatch):
